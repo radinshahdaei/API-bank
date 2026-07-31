@@ -1,61 +1,22 @@
 {
   "tested_at": "2026-07-31",
-  "summary": {
-    "total_verified_working": 12,
-    "no_auth_working": 12,
-    "need_api_key_to_test": 27
-  },
-  "no_auth_verified": {
-    "OVHcloud": {
-      "base_url": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
-      "auth": "NONE — no API key, no signup",
-      "rate_limit": "2 RPM per model per IP",
-      "openai_compatible": true,
-      "working_models": [
-        {"model": "Qwen3-Coder-30B-A3B-Instruct", "latency_ms": 443, "notes": "Fast, reliable"},
-        {"model": "Mistral-Nemo-Instruct-2407", "latency_ms": 448, "notes": "Fast, reliable"},
-        {"model": "Mistral-7B-Instruct-v0.3", "latency_ms": 503, "notes": "Fast, reliable"},
-        {"model": "Qwen3-32B", "latency_ms": 1018, "notes": "Reasoning model, outputs thinking"},
-        {"model": "gpt-oss-20b", "latency_ms": 594, "notes": "Works but sometimes returns empty"},
-        {"model": "Qwen3.6-27B", "latency_ms": 664, "notes": "Works but sometimes returns empty"}
-      ],
-      "rate_limited_but_working": [
-        "Qwen3.5-397B-A17B",
-        "gpt-oss-120b",
-        "Meta-Llama-3_3-70B-Instruct"
-      ],
-      "broken": [
-        {"model": "Mistral-Small-3.2-24B-Instruct", "error": "404 model_not_found"},
-        {"model": "Qwen3.5-9B", "error": "Timeout"}
-      ]
-    },
-    "Kilo_Gateway": {
-      "base_url": "https://api.kilo.ai/api/gateway",
-      "auth": "NONE — no account needed",
-      "rate_limit": "200 req/hr per IP",
-      "openai_compatible": true,
-      "working_models": [
-        {"model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", "latency_ms": 1419},
-        {"model": "nvidia/nemotron-3-super-120b-a12b:free", "latency_ms": 1515},
-        {"model": "nvidia/nemotron-3-ultra-550b-a55b:free", "latency_ms": 1729},
-        {"model": "inclusionai/ling-3.0-flash:free", "latency_ms": 15058, "notes": "Slow but works"}
-      ],
-      "broken": [
-        {"model": "stepfun/step-3.7-flash:free", "error": "Empty response / NoneType"},
-        {"model": "poolside/laguna-s-2.1:free", "error": "Empty response / NoneType"},
-        {"model": "poolside/laguna-xs-2.1:free", "error": "Empty response / NoneType"},
-        {"model": "cohere/north-mini-code:free", "error": "Rate limited on test"}
-      ]
-    },
-    "LLM7_io": {
-      "base_url": "https://api.llm7.io/v1",
-      "auth": "No registration for basic tier, but some models need API key",
-      "rate_limit": "30 RPM anonymous, 120 RPM with token",
-      "openai_compatible": true,
-      "working_no_auth": [
-        {"model": "codestral-latest", "latency_ms": 683},
-        {"model": "gemini-3.1-flash-lite", "latency_ms": 1822}
-      ]
-    }
+  "active_endpoints": 6,
+  "providers": ["Kilo Gateway", "LLM7.io", "OpenCode Zen"],
+  "auth_required": false,
+  "reasoning_disabled": true,
+  "endpoints": [
+    {"provider": "Kilo Gateway", "name": "Kilo-Nemotron-Nano", "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", "rate_limit": "200 req/hr shared"},
+    {"provider": "Kilo Gateway", "name": "Kilo-Ling-3-Flash", "model": "inclusionai/ling-3.0-flash:free", "rate_limit": "200 req/hr shared"},
+    {"provider": "LLM7.io", "name": "LLM7-Codestral", "model": "codestral-latest", "rate_limit": "30 RPM shared"},
+    {"provider": "LLM7.io", "name": "LLM7-Gemini-Flash", "model": "gemini-3.1-flash-lite", "rate_limit": "30 RPM shared"},
+    {"provider": "OpenCode Zen", "name": "Zen-DeepSeek-V4-Flash", "model": "deepseek-v4-flash-free", "rate_limit": "~30 RPM shared"},
+    {"provider": "OpenCode Zen", "name": "Zen-Nemotron-3-Ultra", "model": "nemotron-3-ultra-free", "rate_limit": "~30 RPM shared"}
+  ],
+  "dropped": {
+    "OVHcloud": "Persistent HTTP 500 and rate limiting",
+    "Kilo-OpenRouter": "Safety filter replaces output",
+    "LLM7-MiniMax": "Echoes reasoning instead of answering",
+    "Kilo-Nemotron-3-Super": "Garbled output",
+    "Zen-MiMo-V2.5": "Never outputs content"
   }
 }
