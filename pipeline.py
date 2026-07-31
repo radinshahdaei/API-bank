@@ -263,6 +263,7 @@ class Pipeline:
         max_tokens: int = 512,
         temperature: float = 0.8,
         max_per_endpoint: Optional[int] = None,
+        repeat: int = 1,
         resume: bool = False,
         dry_run: bool = False,
     ):
@@ -272,6 +273,7 @@ class Pipeline:
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.max_per_endpoint = max_per_endpoint
+        self.repeat = repeat
         self.dry_run = dry_run
         self.resume = resume
 
@@ -287,6 +289,7 @@ class Pipeline:
     def _load_completed(self):
         if not os.path.exists(self.output_path):
             return
+        count = 0
         with open(self.output_path) as f:
             for line in f:
                 line = line.strip()
@@ -294,18 +297,24 @@ class Pipeline:
                     continue
                 try:
                     rec = json.loads(line)
-                    self._completed.add((rec["endpoint"], rec["prompt_hash"]))
+                    # Old format: (endpoint, prompt_hash). New format: (endpoint, dedup_key).
+                    # For resume on old files, treat prompt_hash as rep0
+                    ph = rec["prompt_hash"]
+                    self._completed.add((rec["endpoint"], f"{ph}__rep0"))
+                    count += 1
                 except (json.JSONDecodeError, KeyError):
                     pass
-        print(f"📂 Resumed: {len(self._completed)} already-completed generations found")
+        if count:
+            print(f"📂 Resumed: {count} already-completed generations found (as rep0)")
 
-    def _save_result(self, record: dict):
+    def _save_result(self, record: dict, dedup_key: str):
         with self._lock:
             with open(self.output_path, "a") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
-            self._completed.add((record["endpoint"], record["prompt_hash"]))
+            self._completed.add((record["endpoint"], dedup_key))
 
-    def _generate_one(self, endpoint: Endpoint, prompt: str, limiter: RateLimiter) -> dict:
+    def _generate_one(self, endpoint: Endpoint, prompt: str, dedup_key: str,
+                      limiter: RateLimiter) -> dict:
         """Generate one sample: acquire shared limiter, call endpoint, build record."""
         ph = self._prompt_hash(prompt)
 
@@ -324,7 +333,7 @@ class Pipeline:
 
         if self.dry_run:
             record["status"] = "dry_run"
-            return record
+            return record, dedup_key
 
         # Shared rate limiter ensures we don't exceed per-IP limits
         limiter.acquire()
@@ -337,25 +346,30 @@ class Pipeline:
             "usage": result.get("usage"),
             "error": result.get("error"),
         })
-        return record
+        return record, dedup_key
 
-    def _should_generate(self, endpoint: Endpoint, prompt: str) -> bool:
-        key = (endpoint.name, self._prompt_hash(prompt))
+    def _should_generate(self, endpoint: Endpoint, prompt: str, dedup_key: str) -> bool:
+        key = (endpoint.name, dedup_key)
         return key not in self._completed and not self._shutdown.is_set()
 
-    def _build_jobs(self) -> list[tuple[Endpoint, str, RateLimiter]]:
-        """Build (endpoint, prompt, limiter) triples, filtering completed."""
+    def _build_jobs(self) -> list[tuple[Endpoint, str, str, RateLimiter]]:
+        """Build (endpoint, prompt, dedup_key, limiter) tuples, filtering completed."""
         jobs = []
         for ep in self.endpoints:
             limiter = get_limiter_for(ep)
-            limit = self.max_per_endpoint or len(self.prompts)
+            limit = self.max_per_endpoint or (len(self.prompts) * self.repeat)
             count = 0
-            for prompt in self.prompts:
+            for rep in range(self.repeat):
+                for prompt in self.prompts:
+                    if count >= limit:
+                        break
+                    dedup_key = f"{self._prompt_hash(prompt)}__rep{rep}"
+                    key = (ep.name, dedup_key)
+                    if key not in self._completed and not self._shutdown.is_set():
+                        jobs.append((ep, prompt, dedup_key, limiter))
+                        count += 1
                 if count >= limit:
                     break
-                if self._should_generate(ep, prompt):
-                    jobs.append((ep, prompt, limiter))
-                    count += 1
         return jobs
 
     def run(self):
@@ -389,8 +403,8 @@ class Pipeline:
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_map = {
-                executor.submit(self._generate_one, ep, prompt, limiter): (ep, prompt)
-                for ep, prompt, limiter in jobs
+                executor.submit(self._generate_one, ep, prompt, dk, limiter): (ep, prompt, dk)
+                for ep, prompt, dk, limiter in jobs
             }
 
             for future in as_completed(future_map):
@@ -399,9 +413,9 @@ class Pipeline:
                         f.cancel()
                     break
 
-                ep, prompt = future_map[future]
+                ep, prompt, dk = future_map[future]
                 try:
-                    record = future.result()
+                    record, dedup_key = future.result()
                 except Exception as e:
                     record = {
                         "endpoint": ep.name, "prompt": prompt,
@@ -409,6 +423,7 @@ class Pipeline:
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "status": "error", "error": f"Pipeline: {e}",
                     }
+                    dedup_key = dk
 
                 if record["status"] == "ok":
                     completed += 1
@@ -420,7 +435,7 @@ class Pipeline:
                     errors += 1
 
                 if not self.dry_run and record["status"] not in ("dry_run",):
-                    self._save_result(record)
+                    self._save_result(record, dedup_key)
 
                 total_done = completed + errors + rate_limited
                 pct = total_done / total_jobs * 100
@@ -488,10 +503,12 @@ def main():
     g = parser.add_argument_group("Limits")
     g.add_argument("--max-per-endpoint", type=int,
                    help="Cap generations per endpoint")
+    g.add_argument("--repeat", type=int, default=1,
+                   help="Repeat each prompt N times per endpoint (default: 1)")
     g.add_argument("--endpoint", type=str, nargs="*",
                    help="Filter endpoints (prefix match)")
     g.add_argument("--include-flaky", action="store_true",
-                   help="Include flaky endpoints (gpt-oss-20b, Qwen3.6-27B)")
+                   help="Include flaky endpoints")
 
     g = parser.add_argument_group("Runtime")
     g.add_argument("--resume", action="store_true",
@@ -557,6 +574,7 @@ def main():
         max_tokens=args.max_tokens,
         temperature=args.temperature,
         max_per_endpoint=args.max_per_endpoint,
+        repeat=args.repeat,
         resume=args.resume,
         dry_run=args.dry_run,
     ).run()
