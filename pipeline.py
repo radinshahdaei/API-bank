@@ -100,7 +100,14 @@ class Endpoint:
         }
 
         last_error = None
-        for attempt in range(retries + 1):
+        tried_reasoning_off = False
+        for attempt in range(retries + 2):  # +2 for possible reasoning retry
+            # Try with reasoning disabled on first attempt (saves 50-70% tokens)
+            if not tried_reasoning_off:
+                payload["reasoning_effort"] = "none"
+            else:
+                payload.pop("reasoning_effort", None)
+
             start = time.time()
             try:
                 resp = requests.post(
@@ -110,6 +117,11 @@ class Endpoint:
                     timeout=self.timeout,
                 )
                 latency_ms = (time.time() - start) * 1000
+
+                # If reasoning_effort causes a 400, retry without it
+                if resp.status_code == 400 and not tried_reasoning_off:
+                    tried_reasoning_off = True
+                    continue
 
                 if resp.status_code == 200:
                     data = resp.json()
