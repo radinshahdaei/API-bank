@@ -181,6 +181,10 @@ ENDPOINTS = [
              timeout=120),
 
     # ═══ Kilo Gateway — no auth, 200 req/hr shared ═══
+    Endpoint(name="Kilo-OpenRouter",
+             base_url="https://api.kilo.ai/api/gateway",
+             model="openrouter/free",
+             timeout=120),
     Endpoint(name="Kilo-Nemotron-Nano",
              base_url="https://api.kilo.ai/api/gateway",
              model="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
@@ -198,6 +202,10 @@ ENDPOINTS = [
     Endpoint(name="LLM7-Gemini-Flash",
              base_url="https://api.llm7.io/v1",
              model="gemini-3.1-flash-lite",
+             timeout=120),
+    Endpoint(name="LLM7-MiniMax-M2.7",
+             base_url="https://api.llm7.io/v1",
+             model="minimax-m2.7",
              timeout=120),
 
     # ═══ OpenCode Zen — no auth, curated gateway ═══
