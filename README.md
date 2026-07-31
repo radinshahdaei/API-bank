@@ -1,6 +1,6 @@
 # API Bank — Free LLM Dataset Generation Pipeline
 
-Generate large text datasets using **15 verified free LLM endpoints** — no API keys, no credit cards, no signup required.
+Generate large text datasets using **10 verified free LLM endpoints** — no API keys, no credit cards, no signup required.
 
 ## Quick Start
 
@@ -20,15 +20,16 @@ python pipeline.py \
   --output my_dataset.jsonl
 ```
 
-## Verified Endpoints (13 stable, no auth)
+## Verified Endpoints (10 stable, no auth)
 
 | Provider | Endpoints | Rate Limit | Auth |
 |---|---|---|---|
-| **OVHcloud** | 7 models (Qwen, Mistral, Llama, GPT-OSS) | 2 RPM/model | None |
-| **Kilo Gateway** | 4 models (Nemotron Ultra/Super/Nano, Ling) | 200 req/hr | None |
+| **OVHcloud** | 3 models (Qwen3-Coder, Mistral Nemo, Mistral 7B) | 2 RPM/model | None |
+| **Kilo Gateway** | 3 models (Nemotron Ultra/Nano, Ling Flash) | 200 req/hr | None |
 | **LLM7.io** | 2 models (Codestral, Gemini Flash) | 30 RPM | None |
+| **OpenCode Zen** | 2 models (DeepSeek V4 Flash, Nemotron 3 Ultra) | ~30 RPM | None |
 
-**Sustained throughput:** ~18 req/min → **~1,000 generations/hour → ~25,000/day**
+**Sustained throughput:** ~13 req/min → **~800 generations/hour → ~19,000/day**
 
 ## Pipeline Features
 

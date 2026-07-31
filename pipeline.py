@@ -161,6 +161,9 @@ _kilo_limiter = RateLimiter(rpm=3, rph=200)
 # LLM7.io: 30 RPM for anonymous
 _llm7_limiter = RateLimiter(rpm=30)
 
+# OpenCode Zen: no auth, curated gateway
+_zen_limiter = RateLimiter(rpm=30)
+
 
 ENDPOINTS = [
     # ═══ OVHcloud — no auth, 2 RPM per model, shared IP ═══
@@ -176,31 +179,11 @@ ENDPOINTS = [
              base_url="https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
              model="Mistral-7B-Instruct-v0.3",
              timeout=120),
-    Endpoint(name="OVH-Qwen3-32B",
-             base_url="https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
-             model="Qwen3-32B",
-             timeout=180),
-    Endpoint(name="OVH-Llama-3.3-70B",
-             base_url="https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
-             model="Meta-Llama-3_3-70B-Instruct",
-             timeout=120),
-    Endpoint(name="OVH-Qwen3.5-397B",
-             base_url="https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
-             model="Qwen3.5-397B-A17B",
-             timeout=180),
-    Endpoint(name="OVH-gpt-oss-120b",
-             base_url="https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
-             model="gpt-oss-120b",
-             timeout=120),
 
     # ═══ Kilo Gateway — no auth, 200 req/hr shared ═══
     Endpoint(name="Kilo-Nemotron-3-Ultra",
              base_url="https://api.kilo.ai/api/gateway",
              model="nvidia/nemotron-3-ultra-550b-a55b:free",
-             timeout=120),
-    Endpoint(name="Kilo-Nemotron-3-Super",
-             base_url="https://api.kilo.ai/api/gateway",
-             model="nvidia/nemotron-3-super-120b-a12b:free",
              timeout=120),
     Endpoint(name="Kilo-Nemotron-Nano",
              base_url="https://api.kilo.ai/api/gateway",
@@ -220,6 +203,16 @@ ENDPOINTS = [
              base_url="https://api.llm7.io/v1",
              model="gemini-3.1-flash-lite",
              timeout=120),
+
+    # ═══ OpenCode Zen — no auth, curated gateway ═══
+    Endpoint(name="Zen-DeepSeek-V4-Flash",
+             base_url="https://opencode.ai/zen/v1",
+             model="deepseek-v4-flash-free",
+             timeout=120),
+    Endpoint(name="Zen-Nemotron-3-Ultra",
+             base_url="https://opencode.ai/zen/v1",
+             model="nemotron-3-ultra-free",
+             timeout=120),
 ]
 
 # Map endpoints to their shared rate limiter (by provider prefix)
@@ -227,6 +220,7 @@ _LIMITERS = {
     "OVH": _ovhcloud_limiter,
     "Kilo": _kilo_limiter,
     "LLM7": _llm7_limiter,
+    "Zen": _zen_limiter,
 }
 
 FLAKY_ENDPOINTS = [
