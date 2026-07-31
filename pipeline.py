@@ -181,10 +181,6 @@ ENDPOINTS = [
              timeout=120),
 
     # ═══ Kilo Gateway — no auth, 200 req/hr shared ═══
-    Endpoint(name="Kilo-Nemotron-3-Ultra",
-             base_url="https://api.kilo.ai/api/gateway",
-             model="nvidia/nemotron-3-ultra-550b-a55b:free",
-             timeout=120),
     Endpoint(name="Kilo-Nemotron-Nano",
              base_url="https://api.kilo.ai/api/gateway",
              model="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
