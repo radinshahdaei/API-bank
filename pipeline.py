@@ -164,9 +164,6 @@ class Endpoint:
 # Provider Groups — shared rate limiters per provider (same IP = same pool)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# OVHcloud: 2 RPM per model, but shared IP means we serialize across all models
-_ovhcloud_limiter = RateLimiter(rpm=18, rph=1080)
-
 # Kilo Gateway: 200 req/hr per IP
 _kilo_limiter = RateLimiter(rpm=3, rph=200)
 
@@ -178,25 +175,7 @@ _zen_limiter = RateLimiter(rpm=30)
 
 
 ENDPOINTS = [
-    # ═══ OVHcloud — no auth, 2 RPM per model, shared IP ═══
-    Endpoint(name="OVH-Qwen3-Coder-30B",
-             base_url="https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
-             model="Qwen3-Coder-30B-A3B-Instruct",
-             timeout=120),
-    Endpoint(name="OVH-Mistral-Nemo",
-             base_url="https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
-             model="Mistral-Nemo-Instruct-2407",
-             timeout=120),
-    Endpoint(name="OVH-Mistral-7B",
-             base_url="https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
-             model="Mistral-7B-Instruct-v0.3",
-             timeout=120),
-
     # ═══ Kilo Gateway — no auth, 200 req/hr shared ═══
-    Endpoint(name="Kilo-OpenRouter",
-             base_url="https://api.kilo.ai/api/gateway",
-             model="openrouter/free",
-             timeout=120),
     Endpoint(name="Kilo-Nemotron-Nano",
              base_url="https://api.kilo.ai/api/gateway",
              model="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
@@ -215,11 +194,6 @@ ENDPOINTS = [
              base_url="https://api.llm7.io/v1",
              model="gemini-3.1-flash-lite",
              timeout=120),
-    Endpoint(name="LLM7-MiniMax-M2.7",
-             base_url="https://api.llm7.io/v1",
-             model="minimax-m2.7",
-             timeout=120),
-
     # ═══ OpenCode Zen — no auth, curated gateway ═══
     Endpoint(name="Zen-DeepSeek-V4-Flash",
              base_url="https://opencode.ai/zen/v1",
@@ -233,22 +207,12 @@ ENDPOINTS = [
 
 # Map endpoints to their shared rate limiter (by provider prefix)
 _LIMITERS = {
-    "OVH": _ovhcloud_limiter,
     "Kilo": _kilo_limiter,
     "LLM7": _llm7_limiter,
     "Zen": _zen_limiter,
 }
 
-FLAKY_ENDPOINTS = [
-    Endpoint(name="OVH-gpt-oss-20b",
-             base_url="https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
-             model="gpt-oss-20b",
-             timeout=120),
-    Endpoint(name="OVH-Qwen3.6-27B",
-             base_url="https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
-             model="Qwen3.6-27B",
-             timeout=120),
-]
+FLAKY_ENDPOINTS = []
 
 
 def get_limiter_for(endpoint: Endpoint) -> RateLimiter:
