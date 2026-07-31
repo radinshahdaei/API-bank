@@ -1,0 +1,41 @@
+# Generated datasets
+*.jsonl
+!prompts.example.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Test output
+test_run.jsonl
+full_demo.jsonl
+demo_template.jsonl
+results.json
+noauth_results.json
+noauth_results_r2.json
+test_*.json
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Reference repos (cloned by scripts/update_references.sh)
+references/
