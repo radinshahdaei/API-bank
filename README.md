@@ -1,6 +1,6 @@
 # API Bank — Free LLM Dataset Generation Pipeline
 
-Generate large text datasets using **10 verified free LLM endpoints** — no API keys, no credit cards, no signup required.
+Generate large text datasets using **11 verified free LLM endpoints** — no API keys, no credit cards, no signup required.
 
 ## Quick Start
 
@@ -20,16 +20,17 @@ python pipeline.py \
   --output my_dataset.jsonl
 ```
 
-## Verified Endpoints (10 stable, no auth)
+## Verified Endpoints (11 stable, no auth)
 
-| Provider | Endpoints | Rate Limit | Auth |
+| Provider | Models | Rate Limit | Auth |
 |---|---|---|---|
-| **OVHcloud** | 3 models (Qwen3-Coder, Mistral Nemo, Mistral 7B) | 2 RPM/model | None |
-| **Kilo Gateway** | 3 models (Nemotron Ultra/Nano, Ling Flash) | 200 req/hr | None |
-| **LLM7.io** | 2 models (Codestral, Gemini Flash) | 30 RPM | None |
-| **OpenCode Zen** | 2 models (DeepSeek V4 Flash, Nemotron 3 Ultra) | ~30 RPM | None |
+| **OVHcloud** | Qwen3-Coder-30B, Mistral-Nemo, Mistral-7B | 2 RPM/model | None |
+| **Kilo Gateway** | OpenRouter→Gemma, Nemotron-Nano, Ling-3-Flash | 200 req/hr | None |
+| **LLM7.io** | Codestral, Gemini-Flash, MiniMax-M2.7 | 30 RPM | None |
+| **OpenCode Zen** | DeepSeek-V4-Flash, Nemotron-3-Ultra | ~30 RPM | None |
 
-**Sustained throughput:** ~13 req/min → **~800 generations/hour → ~19,000/day**
+**10 distinct model families** (Mistral, NVIDIA, Google share 2-3 each; Qwen, Ling, MiniMax, DeepSeek singletons)
+**Sustained throughput:** ~15 req/min → **~900 generations/hour → ~21,000/day**
 
 ## Pipeline Features
 
@@ -62,15 +63,19 @@ API-bank/
 ├── pipeline.py              # Main dataset generation engine
 ├── providers.py             # 30 provider configurations (all tiers)
 ├── test_framework.py        # API testing & verification harness
-├── catalog.md               # Full ranked catalog of 30 free APIs
-├── verified_endpoints.json  # Machine-readable verified results
 ├── prompts.example.txt      # 10 example prompts
-├── init.md                  # Original research brief
+├── docs/
+│   ├── catalog.md           # Full ranked catalog of 30 free APIs
+│   └── verified_endpoints.json
 ├── scripts/
 │   └── update_references.sh # Clone/pull reference API repos
 ├── tests/
-│   ├── test_noauth_deep.py  # Deep no-auth endpoint testing
-│   └── test_noauth_r2.py    # Sequential rate-limit-safe tests
+│   ├── test_all_models.py   # Exhaustive model discovery
+│   ├── test_new_providers.py
+│   ├── test_new_r2.py
+│   ├── test_new_r3.py
+│   ├── test_noauth_deep.py
+│   └── test_noauth_r2.py
 └── references/              # Mirrors of source repos (gitignored)
     ├── free-llm-api-resources/
     ├── awesome-free-llm-apis/
