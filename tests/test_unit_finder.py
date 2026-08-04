@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +13,7 @@ from api_bank.models import Candidate, ProbeResult, WatchedSource
 from api_bank.probe import Prober, validate_probe_target
 from api_bank.sources import SourceWatcher
 from api_bank.store import Store
+from api_bank.verification import VerificationPolicy
 
 
 class FakeResponse:
@@ -133,6 +135,8 @@ class StoreTests(unittest.TestCase):
                 rows = list(store.verification_rows())
 
         self.assertEqual(saved.status, "verified")
+        self.assertEqual(saved.auth_mode, "none")
+        self.assertEqual(saved.free_tier, "observed_no_auth")
         self.assertEqual(latest["status"], "working")
         self.assertEqual(len(rows), 1)
 
@@ -351,6 +355,57 @@ class SourceWatcherTests(unittest.TestCase):
         response = FakeResponse(headers={"Content-Length": "101"}, content=b"small")
         result = SourceWatcher(max_bytes=100, session=FakeSession(response)).check(source)
         self.assertEqual(result.status, "too_large")
+
+
+class VerificationPolicyTests(unittest.TestCase):
+    def setUp(self):
+        self.now = datetime(2026, 8, 4, tzinfo=timezone.utc)
+        self.candidate = Candidate(
+            provider="Example",
+            base_url="https://api.example.com/v1",
+            model="small",
+            free_tier="observed_no_auth",
+        )
+
+    def probe(self, status="working", age_days=0):
+        return {
+            "status": status,
+            "tested_at": (self.now - timedelta(days=age_days)).isoformat(),
+            "auth_used": False,
+        }
+
+    def test_requires_latest_success_and_minimum_recent_successes(self):
+        policy = VerificationPolicy(max_age_days=7, min_successes=2)
+        one = policy.evaluate(self.candidate, [self.probe()], now=self.now)
+        two = policy.evaluate(
+            self.candidate,
+            [self.probe(), self.probe(age_days=1)],
+            now=self.now,
+        )
+        failed_latest = policy.evaluate(
+            self.candidate,
+            [self.probe("server_error"), self.probe(age_days=1), self.probe(age_days=2)],
+            now=self.now,
+        )
+        self.assertFalse(one["eligible"])
+        self.assertTrue(two["eligible"])
+        self.assertIn("latest_probe_server_error", failed_latest["reasons"])
+
+    def test_rejects_stale_or_unsubstantiated_free_access(self):
+        stale = VerificationPolicy().evaluate(
+            self.candidate, [self.probe(age_days=8)], now=self.now
+        )
+        unsubstantiated = Candidate(
+            provider="Claimed",
+            base_url="https://claimed.example.com/v1",
+            model="small",
+            free_tier="claimed",
+        )
+        claimed = VerificationPolicy().evaluate(
+            unsubstantiated, [self.probe()], now=self.now
+        )
+        self.assertIn("latest_probe_stale", stale["reasons"])
+        self.assertIn("free_access_not_documented_or_observed", claimed["reasons"])
 
 
 if __name__ == "__main__":

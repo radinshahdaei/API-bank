@@ -76,8 +76,9 @@ same least-privilege and domain-restriction policy. See the official Codex docum
    change detection based on content hashes; selected provider feeds can build on this layer.
 3. **Protocol coverage (complete):** Gemini, Cohere, Cloudflare, and Ollama adapters normalize
    native requests and responses behind the same credential-safe probe interface.
-4. **Verification policy (next):** expiry windows, repeated probes, rate-limit characterization,
-   response-quality checks, and explicit confidence scoring.
+4. **Verification policy (current):** expiry windows, repeated probes, minimum recent-success
+   thresholds, explicit free-evidence gates, and excluded-candidate explanations. Rate-limit
+   characterization and deeper response-quality scoring remain future work.
 5. **Automation:** scheduled research/probe runs, reviewable diffs, and notifications for newly
    verified or newly failing endpoints.
 6. **Generator migration:** make `pipeline.py` consume the recent verified export and fix its

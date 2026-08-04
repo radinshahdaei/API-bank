@@ -22,6 +22,10 @@ python -m api_bank models --id CANDIDATE_ID
 # Probe one candidate without sending credentials
 python -m api_bank probe --id CANDIDATE_ID
 
+# Require three recent successes before promotion
+python -m api_bank probe --id CANDIDATE_ID --repeat 3 --interval 2
+python -m api_bank export --min-successes 3
+
 # Watch cited documentation and pricing pages for changes
 python -m api_bank source-sync
 python -m api_bank source-check
@@ -49,6 +53,9 @@ codex exec --sandbox workspace-write \
 
 python -m api_bank discover --source file --input .api-bank/agent-findings.json
 ```
+
+The same research-only cycle is available as `scripts/run_agent_research.sh`. It creates and
+ingests structured findings but deliberately leaves network probing as a separate reviewed step.
 
 The agent proposes documentation-backed facts. Only the deterministic probe engine can mark an
 endpoint operationally verified. Credentials are never sent unless `probe --with-auth` is

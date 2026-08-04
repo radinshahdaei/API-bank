@@ -197,6 +197,19 @@ class Store:
                     "UPDATE candidates SET status = ?, last_seen = ? WHERE id = ?",
                     (candidate_status, utc_now(), result.candidate_id),
                 )
+            if result.status == "working" and not result.auth_used:
+                self.connection.execute(
+                    """
+                    UPDATE candidates
+                    SET auth_mode = 'none',
+                        free_tier = CASE
+                            WHEN free_tier = 'documented' THEN free_tier
+                            ELSE 'observed_no_auth'
+                        END
+                    WHERE id = ?
+                    """,
+                    (result.candidate_id,),
+                )
         self.connection.commit()
 
     def latest_probe(self, candidate_id: str, request_kind: str = "chat") -> Optional[dict]:
@@ -211,6 +224,22 @@ class Store:
         result["auth_used"] = bool(result["auth_used"])
         result["metadata"] = json.loads(result.pop("metadata_json"))
         return result
+
+    def probe_history(
+        self, candidate_id: str, request_kind: str = "chat", limit: int = 100
+    ) -> list[dict]:
+        rows = self.connection.execute(
+            "SELECT * FROM probes WHERE candidate_id = ? AND request_kind = ? "
+            "ORDER BY tested_at DESC, id DESC LIMIT ?",
+            (candidate_id, request_kind, limit),
+        )
+        history = []
+        for row in rows:
+            item = dict(row)
+            item["auth_used"] = bool(item["auth_used"])
+            item["metadata"] = json.loads(item.pop("metadata_json"))
+            history.append(item)
+        return history
 
     def verification_rows(self) -> Iterable[dict]:
         return self.connection.execute(

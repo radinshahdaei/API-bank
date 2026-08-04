@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -13,6 +14,7 @@ from .models import Candidate, WatchedSource
 from .probe import Prober
 from .sources import SourceWatcher
 from .store import DEFAULT_DB, Store
+from .verification import VerificationPolicy
 
 
 def _json_dump(value, output: str | None = None) -> None:
@@ -67,12 +69,16 @@ def probe(args, store: Store) -> None:
         return
     prober = Prober(timeout=args.timeout, allow_http=args.allow_http)
     for candidate in candidates:
-        mode = "with auth" if args.with_auth else "without auth"
-        print(f"Probing {candidate.provider} / {candidate.model} ({mode})...")
-        result = prober.probe_chat(candidate, with_auth=args.with_auth)
-        store.add_probe(result)
-        suffix = f" HTTP {result.http_status}" if result.http_status else ""
-        print(f"  {result.status}{suffix} ({result.latency_ms or 0:.0f} ms)")
+        for repetition in range(args.repeat):
+            mode = "with auth" if args.with_auth else "without auth"
+            run = f", run {repetition + 1}/{args.repeat}" if args.repeat > 1 else ""
+            print(f"Probing {candidate.provider} / {candidate.model} ({mode}{run})...")
+            result = prober.probe_chat(candidate, with_auth=args.with_auth)
+            store.add_probe(result)
+            suffix = f" HTTP {result.http_status}" if result.http_status else ""
+            print(f"  {result.status}{suffix} ({result.latency_ms or 0:.0f} ms)")
+            if repetition + 1 < args.repeat and args.interval:
+                time.sleep(args.interval)
 
 
 def discover_models(args, store: Store) -> None:
@@ -186,6 +192,10 @@ def agent_queue(args, store: Store) -> None:
             missing.append(f"a deterministic {candidate.protocol} protocol adapter")
         if latest is None:
             missing.append("live probe")
+        elif datetime.fromisoformat(latest["tested_at"]) < datetime.now(timezone.utc) - timedelta(
+            days=args.stale_days
+        ):
+            missing.append("fresh live probe")
         if missing:
             tasks.append(
                 {
@@ -219,24 +229,40 @@ def agent_queue(args, store: Store) -> None:
 
 
 def export_verified(args, store: Store) -> None:
-    cutoff = datetime.now(timezone.utc) - timedelta(days=args.max_age_days)
+    policy = VerificationPolicy(
+        max_age_days=args.max_age_days,
+        min_successes=args.min_successes,
+        require_free_evidence=not args.allow_unverified_free,
+    )
     endpoints = []
-    for row in store.verification_rows():
-        item = dict(row)
-        tested_at = datetime.fromisoformat(item["tested_at"])
-        if tested_at < cutoff:
-            continue
-        item["auth_used"] = bool(item["auth_used"])
-        endpoints.append(item)
+    excluded = []
+    for candidate in store.list_candidates():
+        evaluation = policy.evaluate(candidate, store.probe_history(candidate.id))
+        if evaluation["eligible"]:
+            item = candidate.as_dict()
+            item["verification"] = evaluation
+            endpoints.append(item)
+        elif args.include_excluded:
+            excluded.append(
+                {
+                    "id": candidate.id,
+                    "provider": candidate.provider,
+                    "model": candidate.model,
+                    "reasons": evaluation["reasons"],
+                }
+            )
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "policy": {
             "max_probe_age_days": args.max_age_days,
-            "meaning": "A recent chat-completion probe returned a structurally valid response.",
-            "free_tier_is_separate_evidence": True,
+            "min_recent_successes": args.min_successes,
+            "require_free_evidence": not args.allow_unverified_free,
+            "meaning": "The latest probe worked and all configured evidence gates passed.",
         },
         "endpoints": endpoints,
     }
+    if args.include_excluded:
+        payload["excluded"] = excluded
     _json_dump(payload, args.output)
 
 
@@ -250,6 +276,12 @@ def report(_args, store: Store) -> None:
         print(f"  {status:18s} {count}")
     probed = sum(store.latest_probe(candidate.id) is not None for candidate in candidates)
     print(f"Probed at least once: {probed}")
+    policy = VerificationPolicy()
+    eligible = sum(
+        policy.evaluate(candidate, store.probe_history(candidate.id))["eligible"]
+        for candidate in candidates
+    )
+    print(f"Eligible for default export: {eligible}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -273,6 +305,8 @@ def build_parser() -> argparse.ArgumentParser:
     command.add_argument("--timeout", type=float, default=20)
     command.add_argument("--with-auth", action="store_true", help="Explicitly allow configured API credentials")
     command.add_argument("--allow-http", action="store_true", help="Allow cleartext HTTP targets")
+    command.add_argument("--repeat", type=int, default=1, choices=range(1, 11))
+    command.add_argument("--interval", type=float, default=0, help="Seconds between repeats (max 60)")
     command.set_defaults(handler=probe)
 
     command = commands.add_parser("models", help="Enumerate and ingest models from one candidate")
@@ -299,11 +333,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     command = commands.add_parser("agent-queue", help="Build the structured research queue")
     command.add_argument("--output")
+    command.add_argument("--stale-days", type=int, default=7)
     command.set_defaults(handler=agent_queue)
 
     command = commands.add_parser("export", help="Export recently verified endpoints")
     command.add_argument("--output", default="docs/verified_endpoints.v2.json")
     command.add_argument("--max-age-days", type=int, default=7)
+    command.add_argument("--min-successes", type=int, default=1)
+    command.add_argument("--allow-unverified-free", action="store_true")
+    command.add_argument("--include-excluded", action="store_true")
     command.set_defaults(handler=export_verified)
 
     command = commands.add_parser("report", help="Summarize finder state")
@@ -318,5 +356,7 @@ def main(argv=None) -> None:
         parser.error("--input is required with --source file")
     if args.command == "probe" and args.with_auth and not args.id:
         parser.error("--with-auth requires --id so credentials are scoped to one reviewed target")
+    if args.command == "probe" and not 0 <= args.interval <= 60:
+        parser.error("--interval must be between 0 and 60 seconds")
     with Store(args.db) as store:
         args.handler(args, store)
