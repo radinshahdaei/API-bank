@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "API Bank agent findings",
+  "type": "object",
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "provider": {"type": "string", "minLength": 1},
+          "base_url": {"type": "string", "format": "uri", "pattern": "^https://"},
+          "model": {"type": ["string", "null"]},
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "openai-chat",
+              "gemini",
+              "cloudflare-workers-ai",
+              "cohere-chat",
+              "ollama-chat",
+              "unknown"
+            ]
+          },
+          "auth_mode": {"type": "string", "enum": ["none", "api_key", "unknown"]},
+          "api_key_env": {"type": ["string", "null"]},
+          "free_tier": {
+            "type": "string",
+            "enum": ["unknown", "claimed", "documented", "observed_no_auth"]
+          },
+          "source_url": {"type": ["string", "null"], "format": "uri"},
+          "evidence_summary": {"type": ["string", "null"], "maxLength": 500},
+          "notes": {"type": ["string", "null"], "maxLength": 500}
+        },
+        "required": [
+          "provider",
+          "base_url",
+          "model",
+          "protocol",
+          "auth_mode",
+          "api_key_env",
+          "free_tier",
+          "source_url",
+          "evidence_summary",
+          "notes"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["findings"],
+  "additionalProperties": false
+}

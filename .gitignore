@@ -2,6 +2,10 @@
 *.jsonl
 !prompts.example.txt
 
+# Finder runtime state and generated agent queues
+.api-bank/
+agent-queue.json
+
 # Python
 __pycache__/
 *.pyc

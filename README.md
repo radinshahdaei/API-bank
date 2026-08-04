@@ -1,95 +1,95 @@
-# API Bank — Free LLM Dataset Generation Pipeline
+# API Bank — Discover and Verify Free LLM APIs
 
-Generate large text datasets using **6 verified free LLM endpoints** — no API keys, no credit cards, no signup required.
+API Bank is an evidence-first toolkit for finding, researching, and continuously testing free
+text-generation APIs. It combines deterministic HTTP probes with structured research from an
+AI agent. Large-scale dataset generation remains available as a secondary workflow.
 
-## Quick Start
+## Finder quick start
 
 ```bash
 pip install requests
 
+# Import the existing catalog and known runtime endpoints as initial candidates
+python -m api_bank discover --source legacy
+
+# Inspect candidates and create work for an AI research agent
+python -m api_bank list
+python -m api_bank agent-queue --output agent-queue.json
+
+# Probe one candidate without sending credentials
+python -m api_bank probe --id CANDIDATE_ID
+
+# Summarize state and export endpoints with a successful probe from the last 7 days
+python -m api_bank report
+python -m api_bank export --output docs/verified_endpoints.v2.json
+```
+
+Runtime state is stored in `.api-bank/state.db` and is intentionally gitignored. Probe history
+is retained so the project can distinguish a one-off failure from a provider that has gone
+stale.
+
+## Agent-assisted discovery
+
+The repository includes a research prompt, durable agent rules, and a strict output schema:
+
+```bash
+python -m api_bank agent-queue --output agent-queue.json
+
+codex exec --sandbox workspace-write \
+  "Read agent/research_prompt.md and agent-queue.json, then complete the research task." \
+  --output-schema schemas/agent-findings.schema.json \
+  -o .api-bank/agent-findings.json
+
+python -m api_bank discover --source file --input .api-bank/agent-findings.json
+```
+
+The agent proposes documentation-backed facts. Only the deterministic probe engine can mark an
+endpoint operationally verified. Credentials are never sent unless `probe --with-auth` is
+explicitly selected.
+
+See [the finder architecture](docs/finder-architecture.md) for the lifecycle, trust boundary,
+security model, and roadmap.
+
+## Dataset generation (secondary)
+
+The legacy generator still targets six previously verified no-auth endpoints:
+
+```bash
 # 6,000 samples from 10 fact prompts
 python pipeline.py --prompts prompts.txt --max-tokens 100 --temperature 0.9 \
   --max-per-endpoint 100 --output dataset.jsonl
-```
 
-```bash
-# Template mode — 3 styles × 4 topics = 12 prompts
+# Template mode: 3 styles × 4 topics
 python pipeline.py \
   --template "Tell me an interesting fact about {topic} in one sentence." \
   --vars topic="science,history,animals,space" \
   --output dataset.jsonl
 ```
 
-## Verified Endpoints (6, no auth)
+The next migration will make this generator consume the new recent verified export instead of
+maintaining its own hard-coded endpoint list.
 
-| Provider | Models | Rate Limit |
-|---|---|---|
-| **Kilo Gateway** | Nemotron-Nano, Ling-3-Flash | 200 req/hr |
-| **LLM7.io** | Codestral, Gemini-Flash-Lite | 30 RPM |
-| **OpenCode Zen** | DeepSeek-V4-Flash, Nemotron-3-Ultra | ~30 RPM |
+## Project structure
 
-**Sustained throughput:** ~17 req/min → ~1,000/hour → ~24,000/day
+```text
+api_bank/                  Discovery, persistence, probe, and CLI package
+agent/research_prompt.md   Agent research contract
+schemas/                   Machine-readable agent output schema
+pipeline.py                Legacy dataset generation engine
+providers.py               Legacy 30-provider seed catalog
+test_framework.py          Legacy multi-protocol live test harness
+docs/                      Architecture, catalog, and verified snapshots
+tests/                     Offline unit tests plus legacy live investigation scripts
+```
 
-## Pipeline Features
-
-- **Prompt file** or **template × variables** (cartesian product)
-- **Shared rate limiters** per provider — proper serialization
-- **`reasoning_effort: "none"`** with graceful 400 fallback — saves 50-70% tokens
-- **Retry with backoff** on rate limits and transient errors
-- **JSONL output** — append-only, machine-readable
-- **Resume** — `--resume` skips completed prompt×endpoint pairs
-- **Graceful Ctrl+C shutdown** — saves progress
+## Development checks
 
 ```bash
-python pipeline.py --list-endpoints    # See all endpoints
-python pipeline.py --endpoint Kilo Zen # Filter to specific providers
-python pipeline.py --resume            # Resume interrupted run
-python pipeline.py --dry-run           # Preview without API calls
+python -m unittest discover -s tests -p 'test_unit_*.py'
+python -m py_compile api_bank/*.py pipeline.py providers.py
 ```
 
-## Project Structure
-
-```
-├── pipeline.py              # Dataset generation engine
-├── providers.py             # 30 provider configs (all tiers)
-├── test_framework.py        # API testing harness
-├── prompts.txt              # 10 fact prompts
-├── docs/
-│   ├── catalog.md           # Full ranked catalog of 30 free APIs
-│   └── verified_endpoints.json
-├── scripts/
-│   └── update_references.sh # Clone/pull reference API repos
-├── tests/
-│   ├── test_noauth_deep.py  # Deep endpoint testing
-│   └── test_all_models.py   # Exhaustive model discovery
-└── references/              # Source repo mirrors (gitignored)
-```
-
-## Output Format (JSONL)
-
-```json
-{
-  "endpoint": "Zen-DeepSeek-V4-Flash",
-  "model": "deepseek-v4-flash-free",
-  "prompt": "Tell me an interesting fact about science in one sentence.",
-  "status": "ok",
-  "generation": "The speed of light is so fundamentally tied to...",
-  "latency_ms": 731.2,
-  "usage": {"prompt_tokens": 12, "completion_tokens": 25, "total_tokens": 37}
-}
-```
-
-## Scaling Up
-
-`providers.py` has configs for 30+ APIs. Set the environment variables for S-Tier providers
-(Mistral, Groq, Google Gemini, NVIDIA NIM) and add them to `pipeline.py` to 5-10x throughput.
-
-## Sources
-
-- [cheahjs/free-llm-api-resources](https://github.com/cheahjs/free-llm-api-resources)
-- [mnfst/awesome-free-llm-apis](https://github.com/mnfst/awesome-free-llm-apis)
-- [12britz/awesome-free-models](https://github.com/12britz/awesome-free-models)
-- [public-apis/public-apis](https://github.com/public-apis/public-apis)
+Live endpoint probes are deliberately not part of the offline unit-test suite.
 
 ## License
 
