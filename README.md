@@ -54,6 +54,10 @@ The agent proposes documentation-backed facts. Only the deterministic probe engi
 endpoint operationally verified. Credentials are never sent unless `probe --with-auth` is
 explicitly selected.
 
+Probe adapters currently cover OpenAI-compatible chat, Google Gemini, Cohere v2 chat, Ollama
+native chat, and Cloudflare Workers AI. Model enumeration currently targets OpenAI-compatible
+`/models` endpoints.
+
 See [the finder architecture](docs/finder-architecture.md) for the lifecycle, trust boundary,
 security model, and roadmap.
 

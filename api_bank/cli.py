@@ -98,6 +98,7 @@ def discover_models(args, store: Store) -> None:
             protocol=candidate.protocol,
             auth_mode=candidate.auth_mode,
             api_key_env=candidate.api_key_env,
+            account_id_env=candidate.account_id_env,
             free_tier=candidate.free_tier,
             source_kind=candidate.source_kind,
             source_url=candidate.source_url,

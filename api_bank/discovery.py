@@ -29,6 +29,14 @@ LEGACY_PROTOCOLS = {
     "Ollama Cloud": "ollama-chat",
 }
 
+SUPPORTED_PROBE_PROTOCOLS = {
+    "openai-chat",
+    "gemini",
+    "cloudflare-workers-ai",
+    "cohere-chat",
+    "ollama-chat",
+}
+
 
 def legacy_candidates() -> Iterable[Candidate]:
     """Import the existing catalog and six runtime endpoints as initial seeds."""
@@ -55,6 +63,7 @@ def legacy_candidates() -> Iterable[Candidate]:
             protocol=protocol,
             auth_mode="api_key" if provider.get("auth_required") else "none",
             api_key_env=provider.get("api_key_env"),
+            account_id_env=provider.get("account_id_env"),
             free_tier="claimed",
             source_kind="legacy_catalog",
             source_url="docs/catalog.md",
@@ -64,7 +73,7 @@ def legacy_candidates() -> Iterable[Candidate]:
                 "needs_research"
                 if is_placeholder
                 else "needs_adapter"
-                if not provider.get("openai_compatible")
+                if protocol not in SUPPORTED_PROBE_PROTOCOLS
                 else "discovered"
             ),
         )

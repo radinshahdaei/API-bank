@@ -257,6 +257,78 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(result.metadata["models"], ["model-a", "model-b"])
         self.assertEqual(result.metadata["model_count"], 2)
 
+    def test_gemini_adapter_uses_query_key_and_normalizes_response(self):
+        session = FakeSession(
+            FakeResponse(
+                payload={
+                    "candidates": [{"content": {"parts": [{"text": "API_BANK_OK"}]}}]
+                }
+            )
+        )
+        candidate = Candidate(
+            provider="Gemini",
+            base_url="https://generativelanguage.googleapis.com/v1beta",
+            model="gemini-test",
+            protocol="gemini",
+            auth_mode="api_key",
+            api_key_env="GEMINI_TEST_KEY",
+        )
+        with patch.dict(os.environ, {"GEMINI_TEST_KEY": "query-secret"}):
+            result = Prober(session=session).probe_chat(candidate, with_auth=True)
+        self.assertEqual(result.status, "working")
+        _url, kwargs = session.calls[0]
+        self.assertEqual(kwargs["params"], {"key": "query-secret"})
+        self.assertNotIn("Authorization", kwargs["headers"])
+
+    def test_cohere_adapter_normalizes_content_blocks(self):
+        session = FakeSession(
+            FakeResponse(payload={"message": {"content": [{"type": "text", "text": "API_BANK_OK"}]}})
+        )
+        candidate = Candidate(
+            provider="Cohere",
+            base_url="https://api.cohere.com/v2",
+            model="command-test",
+            protocol="cohere-chat",
+        )
+        result = Prober(session=session).probe_chat(candidate)
+        self.assertEqual(result.status, "working")
+        self.assertEqual(result.response_preview, "API_BANK_OK")
+
+    def test_ollama_adapter_normalizes_native_message(self):
+        session = FakeSession(
+            FakeResponse(payload={"model": "test:latest", "message": {"content": "API_BANK_OK"}})
+        )
+        candidate = Candidate(
+            provider="Ollama",
+            base_url="https://api.ollama.com",
+            model="test:latest",
+            protocol="ollama-chat",
+        )
+        result = Prober(session=session).probe_chat(candidate)
+        self.assertEqual(result.status, "working")
+        self.assertEqual(result.model_returned, "test:latest")
+
+    def test_cloudflare_adapter_scopes_account_and_key_to_explicit_probe(self):
+        session = FakeSession(FakeResponse(payload={"result": {"response": "API_BANK_OK"}}))
+        candidate = Candidate(
+            provider="Cloudflare",
+            base_url="https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/ai/run",
+            model="@cf/example/model",
+            protocol="cloudflare-workers-ai",
+            auth_mode="api_key",
+            api_key_env="CF_TEST_KEY",
+            account_id_env="CF_TEST_ACCOUNT",
+        )
+        with patch.dict(
+            os.environ,
+            {"CF_TEST_KEY": "bearer-secret", "CF_TEST_ACCOUNT": "account-123"},
+        ):
+            result = Prober(session=session).probe_chat(candidate, with_auth=True)
+        self.assertEqual(result.status, "working")
+        url, kwargs = session.calls[0]
+        self.assertIn("accounts/account-123/ai/run/@cf/example/model", url)
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer bearer-secret")
+
 
 class SourceWatcherTests(unittest.TestCase):
     def test_unchanged_response_uses_conditional_headers(self):

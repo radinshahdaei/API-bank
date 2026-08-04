@@ -59,6 +59,7 @@ class Store:
                 protocol TEXT NOT NULL,
                 auth_mode TEXT NOT NULL,
                 api_key_env TEXT,
+                account_id_env TEXT,
                 free_tier TEXT NOT NULL,
                 source_kind TEXT NOT NULL,
                 source_url TEXT,
@@ -116,6 +117,11 @@ class Store:
                 ON source_checks(source_id, checked_at DESC);
             """
         )
+        candidate_columns = {
+            row["name"] for row in self.connection.execute("PRAGMA table_info(candidates)")
+        }
+        if "account_id_env" not in candidate_columns:
+            self.connection.execute("ALTER TABLE candidates ADD COLUMN account_id_env TEXT")
         self.connection.commit()
 
     def upsert_candidate(self, candidate: Candidate) -> bool:
@@ -131,6 +137,7 @@ class Store:
                 candidate.provider = previous.provider
                 candidate.auth_mode = previous.auth_mode
                 candidate.api_key_env = previous.api_key_env
+                candidate.account_id_env = previous.account_id_env
                 candidate.free_tier = previous.free_tier
                 candidate.source_kind = previous.source_kind
                 candidate.source_url = previous.source_url

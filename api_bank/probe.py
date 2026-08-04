@@ -1,12 +1,11 @@
-"""Small, deterministic, and credential-safe HTTP probes."""
+"""Small, deterministic, credential-safe probes with protocol adapters."""
 
 from __future__ import annotations
 
 import ipaddress
 import os
 import time
-from typing import Optional
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import requests
 
@@ -39,21 +38,30 @@ class Prober:
 
     def probe_chat(self, candidate: Candidate, with_auth: bool = False) -> ProbeResult:
         validate_probe_target(candidate.base_url, self.allow_http)
-        if candidate.protocol != "openai-chat":
+        if not candidate.model:
+            return ProbeResult(candidate.id, "chat", "skipped", error="No model configured")
+        adapters = {
+            "openai-chat": self._probe_openai,
+            "gemini": self._probe_gemini,
+            "cohere-chat": self._probe_cohere,
+            "ollama-chat": self._probe_ollama,
+            "cloudflare-workers-ai": self._probe_cloudflare,
+        }
+        adapter = adapters.get(candidate.protocol)
+        if not adapter:
             return ProbeResult(
                 candidate.id,
                 "chat",
                 "skipped",
-                error=f"No {candidate.protocol} probe adapter is available yet",
+                error=f"No {candidate.protocol} probe adapter is available",
             )
-        if not candidate.model:
-            return ProbeResult(candidate.id, "chat", "skipped", error="No model configured")
+        return adapter(candidate, with_auth)
 
-        headers, auth_used, auth_error = self._headers(candidate, with_auth)
+    def _probe_openai(self, candidate: Candidate, with_auth: bool) -> ProbeResult:
+        key, auth_error = self._credential(candidate, with_auth)
         if auth_error:
             return auth_error
-
-        url = f"{candidate.base_url}/chat/completions"
+        headers = self._json_headers(key)
         payload = {
             "model": candidate.model,
             "messages": [{"role": "user", "content": PROBE_PROMPT}],
@@ -61,65 +69,167 @@ class Prober:
             "temperature": 0,
             "stream": False,
         }
-        started = time.monotonic()
+        response, latency_or_error = self._post(
+            candidate,
+            f"{candidate.base_url}/chat/completions",
+            headers,
+            payload,
+            bool(key),
+        )
+        if response is None:
+            return latency_or_error
+        latency = latency_or_error
+        if response.status_code != 200:
+            return self._http_failure(candidate, response, latency, bool(key))
         try:
-            response = self.session.post(
-                url,
-                headers=headers,
-                json=payload,
-                timeout=self.timeout,
-                allow_redirects=False,
-            )
-        except requests.Timeout:
-            return self._error(candidate, started, "timeout", "Request timed out", auth_used)
-        except requests.RequestException as exc:
-            return self._error(candidate, started, "network_error", str(exc), auth_used)
+            data = response.json()
+            choice = data["choices"][0]
+            text = (choice["message"].get("content") or "")[:160]
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            return self._invalid(candidate, latency, bool(key), "OpenAI-compatible", exc)
+        return self._working(
+            candidate,
+            latency,
+            bool(key),
+            text,
+            data.get("model"),
+            {"finish_reason": choice.get("finish_reason")},
+        )
 
-        latency = round((time.monotonic() - started) * 1000, 1)
-        status = response.status_code
-        if status == 200:
-            try:
-                data = response.json()
-                message = data["choices"][0]["message"]
-                text = message.get("content") or ""
-            except (ValueError, KeyError, IndexError, TypeError) as exc:
+    def _probe_gemini(self, candidate: Candidate, with_auth: bool) -> ProbeResult:
+        key, auth_error = self._credential(candidate, with_auth)
+        if auth_error:
+            return auth_error
+        model = candidate.model.removeprefix("models/")
+        url = f"{candidate.base_url}/models/{quote(model, safe='')}:generateContent"
+        payload = {
+            "contents": [{"parts": [{"text": PROBE_PROMPT}]}],
+            "generationConfig": {"maxOutputTokens": 8, "temperature": 0},
+        }
+        response, latency_or_error = self._post(
+            candidate,
+            url,
+            self._json_headers(),
+            payload,
+            bool(key),
+            params={"key": key} if key else None,
+        )
+        if response is None:
+            return latency_or_error
+        latency = latency_or_error
+        if response.status_code != 200:
+            return self._http_failure(candidate, response, latency, bool(key))
+        try:
+            data = response.json()
+            text = data["candidates"][0]["content"]["parts"][0]["text"][:160]
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            return self._invalid(candidate, latency, bool(key), "Gemini", exc)
+        return self._working(candidate, latency, bool(key), text, model)
+
+    def _probe_cohere(self, candidate: Candidate, with_auth: bool) -> ProbeResult:
+        key, auth_error = self._credential(candidate, with_auth)
+        if auth_error:
+            return auth_error
+        payload = {
+            "model": candidate.model,
+            "messages": [{"role": "user", "content": PROBE_PROMPT}],
+            "max_tokens": 8,
+            "temperature": 0,
+        }
+        response, latency_or_error = self._post(
+            candidate,
+            f"{candidate.base_url}/chat",
+            self._json_headers(key),
+            payload,
+            bool(key),
+        )
+        if response is None:
+            return latency_or_error
+        latency = latency_or_error
+        if response.status_code != 200:
+            return self._http_failure(candidate, response, latency, bool(key))
+        try:
+            data = response.json()
+            content = data["message"]["content"]
+            text = next(item["text"] for item in content if item.get("type", "text") == "text")[:160]
+        except (ValueError, KeyError, IndexError, TypeError, StopIteration) as exc:
+            return self._invalid(candidate, latency, bool(key), "Cohere", exc)
+        return self._working(candidate, latency, bool(key), text, candidate.model)
+
+    def _probe_ollama(self, candidate: Candidate, with_auth: bool) -> ProbeResult:
+        key, auth_error = self._credential(candidate, with_auth)
+        if auth_error:
+            return auth_error
+        payload = {
+            "model": candidate.model,
+            "messages": [{"role": "user", "content": PROBE_PROMPT}],
+            "stream": False,
+            "options": {"temperature": 0, "num_predict": 8},
+        }
+        response, latency_or_error = self._post(
+            candidate,
+            f"{candidate.base_url}/api/chat",
+            self._json_headers(key),
+            payload,
+            bool(key),
+        )
+        if response is None:
+            return latency_or_error
+        latency = latency_or_error
+        if response.status_code != 200:
+            return self._http_failure(candidate, response, latency, bool(key))
+        try:
+            data = response.json()
+            text = data["message"]["content"][:160]
+        except (ValueError, KeyError, TypeError) as exc:
+            return self._invalid(candidate, latency, bool(key), "Ollama", exc)
+        return self._working(candidate, latency, bool(key), text, data.get("model", candidate.model))
+
+    def _probe_cloudflare(self, candidate: Candidate, with_auth: bool) -> ProbeResult:
+        key, auth_error = self._credential(candidate, with_auth)
+        if auth_error:
+            return auth_error
+        base_url = candidate.base_url
+        if "{ACCOUNT_ID}" in base_url:
+            if not with_auth or not candidate.account_id_env:
                 return ProbeResult(
                     candidate.id,
                     "chat",
-                    "invalid_response",
-                    http_status=status,
-                    latency_ms=latency,
-                    error=f"Invalid OpenAI-compatible response: {exc}",
-                    auth_used=auth_used,
+                    "skipped",
+                    error="Cloudflare probing requires --with-auth and account_id_env",
                 )
-            return ProbeResult(
-                candidate.id,
-                "chat",
-                "working",
-                http_status=status,
-                latency_ms=latency,
-                model_returned=data.get("model"),
-                response_preview=text[:160],
-                auth_used=auth_used,
-                metadata={"finish_reason": data["choices"][0].get("finish_reason")},
-            )
-
-        mapped = {
-            401: "auth_required",
-            403: "auth_required",
-            404: "not_found",
-            408: "timeout",
-            429: "rate_limited",
-        }.get(status, "server_error" if status >= 500 else "rejected")
-        return ProbeResult(
-            candidate.id,
-            "chat",
-            mapped,
-            http_status=status,
-            latency_ms=latency,
-            error=response.text[:300],
-            auth_used=auth_used,
+            account_id = os.environ.get(candidate.account_id_env)
+            if not account_id:
+                return ProbeResult(
+                    candidate.id,
+                    "chat",
+                    "skipped",
+                    error=f"Environment variable {candidate.account_id_env} is not set",
+                )
+            base_url = base_url.replace("{ACCOUNT_ID}", quote(account_id, safe=""))
+        validate_probe_target(base_url, self.allow_http)
+        payload = {
+            "messages": [{"role": "user", "content": PROBE_PROMPT}],
+            "max_tokens": 8,
+        }
+        response, latency_or_error = self._post(
+            candidate,
+            f"{base_url}/{candidate.model}",
+            self._json_headers(key),
+            payload,
+            bool(key),
         )
+        if response is None:
+            return latency_or_error
+        latency = latency_or_error
+        if response.status_code != 200:
+            return self._http_failure(candidate, response, latency, bool(key))
+        try:
+            data = response.json()
+            text = data["result"]["response"][:160]
+        except (ValueError, KeyError, TypeError) as exc:
+            return self._invalid(candidate, latency, bool(key), "Cloudflare Workers AI", exc)
+        return self._working(candidate, latency, bool(key), text, candidate.model)
 
     def probe_models(self, candidate: Candidate, with_auth: bool = False) -> ProbeResult:
         """Enumerate an OpenAI-compatible model catalog without selecting a model."""
@@ -131,7 +241,7 @@ class Prober:
                 "skipped",
                 error=f"No {candidate.protocol} model-list adapter is available yet",
             )
-        headers, auth_used, auth_error = self._headers(candidate, with_auth)
+        key, auth_error = self._credential(candidate, with_auth)
         if auth_error:
             auth_error.request_kind = "models"
             return auth_error
@@ -139,29 +249,26 @@ class Prober:
         try:
             response = self.session.get(
                 f"{candidate.base_url}/models",
-                headers=headers,
+                headers=self._json_headers(key),
                 timeout=self.timeout,
                 allow_redirects=False,
             )
         except requests.Timeout:
-            result = self._error(candidate, started, "timeout", "Request timed out", auth_used)
-            result.request_kind = "models"
-            return result
+            return self._error(candidate, started, "models", "timeout", "Request timed out", bool(key))
         except requests.RequestException as exc:
-            result = self._error(candidate, started, "network_error", str(exc), auth_used)
-            result.request_kind = "models"
-            return result
+            return self._error(candidate, started, "models", "network_error", str(exc), bool(key))
 
         latency = round((time.monotonic() - started) * 1000, 1)
         if response.status_code == 200:
             try:
                 data = response.json()
-                raw_models = data["data"]
                 models = sorted(
                     {
                         item["id"].strip()
-                        for item in raw_models
-                        if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"].strip()
+                        for item in data["data"]
+                        if isinstance(item, dict)
+                        and isinstance(item.get("id"), str)
+                        and item["id"].strip()
                     }
                 )
             except (ValueError, KeyError, TypeError) as exc:
@@ -172,7 +279,7 @@ class Prober:
                     http_status=200,
                     latency_ms=latency,
                     error=f"Invalid OpenAI-compatible model list: {exc}",
-                    auth_used=auth_used,
+                    auth_used=bool(key),
                 )
             return ProbeResult(
                 candidate.id,
@@ -180,58 +287,111 @@ class Prober:
                 "working",
                 http_status=200,
                 latency_ms=latency,
-                auth_used=auth_used,
+                auth_used=bool(key),
                 metadata={"models": models[:500], "model_count": len(models)},
             )
+        result = self._http_failure(candidate, response, latency, bool(key))
+        result.request_kind = "models"
+        return result
 
-        mapped = {
-            401: "auth_required",
-            403: "auth_required",
-            404: "not_found",
-            408: "timeout",
-            429: "rate_limited",
-        }.get(response.status_code, "server_error" if response.status_code >= 500 else "rejected")
-        return ProbeResult(
-            candidate.id,
-            "models",
-            mapped,
-            http_status=response.status_code,
-            latency_ms=latency,
-            error=response.text[:300],
-            auth_used=auth_used,
-        )
+    def _post(self, candidate, url, headers, payload, auth_used, params=None):
+        started = time.monotonic()
+        try:
+            response = self.session.post(
+                url,
+                headers=headers,
+                json=payload,
+                params=params,
+                timeout=self.timeout,
+                allow_redirects=False,
+            )
+            return response, round((time.monotonic() - started) * 1000, 1)
+        except requests.Timeout:
+            return None, self._error(
+                candidate, started, "chat", "timeout", "Request timed out", auth_used
+            )
+        except requests.RequestException as exc:
+            return None, self._error(
+                candidate, started, "chat", "network_error", str(exc), auth_used
+            )
 
     @staticmethod
-    def _headers(candidate: Candidate, with_auth: bool):
-        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    def _credential(candidate: Candidate, with_auth: bool):
         if not with_auth:
-            return headers, False, None
+            return None, None
         if not candidate.api_key_env:
-            return headers, False, ProbeResult(
+            return None, ProbeResult(
                 candidate.id, "chat", "skipped", error="No API key environment variable configured"
             )
         api_key = os.environ.get(candidate.api_key_env)
         if not api_key:
-            return headers, False, ProbeResult(
+            return None, ProbeResult(
                 candidate.id,
                 "chat",
                 "skipped",
                 error=f"Environment variable {candidate.api_key_env} is not set",
             )
-        headers["Authorization"] = f"Bearer {api_key}"
-        return headers, True, None
+        return api_key, None
 
     @staticmethod
-    def _error(
-        candidate: Candidate,
-        started: float,
-        status: str,
-        error: str,
-        auth_used: bool,
-    ) -> ProbeResult:
+    def _json_headers(api_key=None):
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        return headers
+
+    @staticmethod
+    def _working(candidate, latency, auth_used, text, model, metadata=None):
         return ProbeResult(
             candidate.id,
             "chat",
+            "working",
+            http_status=200,
+            latency_ms=latency,
+            model_returned=model,
+            response_preview=text,
+            auth_used=auth_used,
+            metadata=metadata or {},
+        )
+
+    @staticmethod
+    def _invalid(candidate, latency, auth_used, protocol, error):
+        return ProbeResult(
+            candidate.id,
+            "chat",
+            "invalid_response",
+            http_status=200,
+            latency_ms=latency,
+            error=f"Invalid {protocol} response: {error}",
+            auth_used=auth_used,
+        )
+
+    @staticmethod
+    def _http_failure(candidate, response, latency, auth_used):
+        status = response.status_code
+        if status in {401, 403} or (status == 400 and candidate.auth_mode == "api_key" and not auth_used):
+            mapped = "auth_required"
+        else:
+            mapped = {
+                404: "not_found",
+                408: "timeout",
+                429: "rate_limited",
+            }.get(status, "server_error" if status >= 500 else "rejected")
+        return ProbeResult(
+            candidate.id,
+            "chat",
+            mapped,
+            http_status=status,
+            latency_ms=latency,
+            error=(getattr(response, "text", "") or "")[:300],
+            auth_used=auth_used,
+        )
+
+    @staticmethod
+    def _error(candidate, started, request_kind, status, error, auth_used):
+        return ProbeResult(
+            candidate.id,
+            request_kind,
             status,
             latency_ms=round((time.monotonic() - started) * 1000, 1),
             error=error[:300],

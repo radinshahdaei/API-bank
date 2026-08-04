@@ -53,6 +53,7 @@ class Candidate:
     protocol: str = "openai-chat"
     auth_mode: str = "unknown"
     api_key_env: Optional[str] = None
+    account_id_env: Optional[str] = None
     free_tier: str = "unknown"
     source_kind: str = "manual"
     source_url: Optional[str] = None
