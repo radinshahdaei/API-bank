@@ -70,10 +70,10 @@ same least-privilege and domain-restriction policy. See the official Codex docum
 
 ## Roadmap
 
-1. **Foundation (current):** canonical schema, legacy ingestion, SQLite history, agent queue,
+1. **Foundation (complete):** canonical schema, legacy ingestion, SQLite history, agent queue,
    no-auth OpenAI-compatible probe, and verified export.
-2. **Discovery adapters:** official documentation feeds, model-list endpoints, selected GitHub
-   sources, and change detection based on content hashes.
+2. **Discovery adapters (current):** OpenAI-compatible model-list expansion and official-source
+   change detection based on content hashes; selected provider feeds can build on this layer.
 3. **Protocol coverage:** Gemini, Cohere, Cloudflare, and Ollama adapters behind one probe
    interface.
 4. **Verification policy:** expiry windows, repeated probes, rate-limit characterization,
@@ -82,4 +82,3 @@ same least-privilege and domain-restriction policy. See the official Codex docum
    verified or newly failing endpoints.
 6. **Generator migration:** make `pipeline.py` consume the recent verified export and fix its
    resume and scheduling behavior.
-

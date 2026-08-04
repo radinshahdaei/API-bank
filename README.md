@@ -16,8 +16,15 @@ python -m api_bank discover --source legacy
 python -m api_bank list
 python -m api_bank agent-queue --output agent-queue.json
 
+# Ask a compatible endpoint which models it currently exposes
+python -m api_bank models --id CANDIDATE_ID
+
 # Probe one candidate without sending credentials
 python -m api_bank probe --id CANDIDATE_ID
+
+# Watch cited documentation and pricing pages for changes
+python -m api_bank source-sync
+python -m api_bank source-check
 
 # Summarize state and export endpoints with a successful probe from the last 7 days
 python -m api_bank report

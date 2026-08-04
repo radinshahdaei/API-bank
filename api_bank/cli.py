@@ -6,9 +6,12 @@ import argparse
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .discovery import candidates_from_file, legacy_candidates
+from .models import Candidate, WatchedSource
 from .probe import Prober
+from .sources import SourceWatcher
 from .store import DEFAULT_DB, Store
 
 
@@ -72,6 +75,91 @@ def probe(args, store: Store) -> None:
         print(f"  {result.status}{suffix} ({result.latency_ms or 0:.0f} ms)")
 
 
+def discover_models(args, store: Store) -> None:
+    candidate = store.get_candidate(args.id)
+    if not candidate:
+        raise SystemExit(f"Unknown candidate: {args.id}")
+    prober = Prober(timeout=args.timeout)
+    mode = "with auth" if args.with_auth else "without auth"
+    print(f"Enumerating models from {candidate.base_url} ({mode})...")
+    result = prober.probe_models(candidate, with_auth=args.with_auth)
+    store.add_probe(result)
+    if result.status != "working":
+        suffix = f" HTTP {result.http_status}" if result.http_status else ""
+        print(f"  {result.status}{suffix}: {result.error or ''}")
+        return
+    model_ids = result.metadata.get("models", [])[: args.limit]
+    created = 0
+    for model_id in model_ids:
+        discovered = Candidate(
+            provider=candidate.provider,
+            base_url=candidate.base_url,
+            model=model_id,
+            protocol=candidate.protocol,
+            auth_mode=candidate.auth_mode,
+            api_key_env=candidate.api_key_env,
+            free_tier=candidate.free_tier,
+            source_kind=candidate.source_kind,
+            source_url=candidate.source_url,
+            evidence_summary=candidate.evidence_summary,
+            notes=f"Discovered from {candidate.base_url}/models",
+        )
+        created += int(store.upsert_candidate(discovered))
+    print(
+        f"  Found {result.metadata.get('model_count', len(model_ids))} models; "
+        f"ingested {len(model_ids)} ({created} new)."
+    )
+
+
+def source_sync(_args, store: Store) -> None:
+    added = skipped = 0
+    for candidate in store.list_candidates():
+        if not candidate.source_url or urlsplit(candidate.source_url).scheme != "https":
+            skipped += 1
+            continue
+        try:
+            source = WatchedSource(
+                provider=candidate.provider,
+                url=candidate.source_url,
+                kind="candidate_evidence",
+            )
+        except ValueError:
+            skipped += 1
+            continue
+        added += int(store.upsert_source(source))
+    print(f"Synchronized sources ({added} new, {skipped} candidates without watchable HTTPS evidence).")
+
+
+def source_list(args, store: Store) -> None:
+    sources = store.list_sources(args.status)
+    if args.json:
+        _json_dump([source.as_dict() for source in sources])
+        return
+    if not sources:
+        print("No watched sources found.")
+        return
+    for source in sources:
+        print(f"{source.id}  {source.status:14s}  {source.provider:24.24s}  {source.url}")
+
+
+def source_check(args, store: Store) -> None:
+    if args.id:
+        source = store.get_source(args.id)
+        if not source:
+            raise SystemExit(f"Unknown source: {args.id}")
+        sources = [source]
+    else:
+        sources = store.list_sources()[: args.limit]
+    watcher = SourceWatcher(timeout=args.timeout, max_bytes=args.max_bytes)
+    for source in sources:
+        print(f"Checking {source.provider}: {source.url}")
+        check = watcher.check(source)
+        store.add_source_check(check)
+        changed = " changed" if check.changed else ""
+        suffix = f" HTTP {check.http_status}" if check.http_status else ""
+        print(f"  {check.status}{changed}{suffix} ({check.latency_ms or 0:.0f} ms)")
+
+
 def agent_queue(args, store: Store) -> None:
     tasks = []
     for candidate in store.list_candidates():
@@ -105,7 +193,28 @@ def agent_queue(args, store: Store) -> None:
                     "research_needed": sorted(set(missing)),
                 }
             )
-    _json_dump({"generated_at": datetime.now(timezone.utc).isoformat(), "tasks": tasks}, args.output)
+    source_tasks = [
+        {
+            "source": source.as_dict(),
+            "research_needed": "Review the source change and refresh affected API claims.",
+        }
+        for source in store.list_sources()
+        if source.status in {"changed", "http_error", "network_error", "too_large"}
+    ]
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "candidate_tasks": tasks,
+        "source_tasks": source_tasks,
+        "scouting_task": {
+            "goal": "Find newly available free text-generation APIs not already present.",
+            "requirements": [
+                "Prefer current official provider documentation.",
+                "Record exact endpoint, model, authentication, and free-tier evidence.",
+                "Do not send credentials or generation requests during research.",
+            ],
+        },
+    }
+    _json_dump(payload, args.output)
 
 
 def export_verified(args, store: Store) -> None:
@@ -164,6 +273,28 @@ def build_parser() -> argparse.ArgumentParser:
     command.add_argument("--with-auth", action="store_true", help="Explicitly allow configured API credentials")
     command.add_argument("--allow-http", action="store_true", help="Allow cleartext HTTP targets")
     command.set_defaults(handler=probe)
+
+    command = commands.add_parser("models", help="Enumerate and ingest models from one candidate")
+    command.add_argument("--id", required=True, help="Candidate whose base URL should be queried")
+    command.add_argument("--limit", type=int, default=100, help="Maximum model IDs to ingest")
+    command.add_argument("--timeout", type=float, default=20)
+    command.add_argument("--with-auth", action="store_true")
+    command.set_defaults(handler=discover_models)
+
+    command = commands.add_parser("source-sync", help="Watch candidate evidence URLs")
+    command.set_defaults(handler=source_sync)
+
+    command = commands.add_parser("source-list", help="List watched evidence sources")
+    command.add_argument("--status")
+    command.add_argument("--json", action="store_true")
+    command.set_defaults(handler=source_list)
+
+    command = commands.add_parser("source-check", help="Check watched sources for content changes")
+    command.add_argument("--id")
+    command.add_argument("--limit", type=int, default=20)
+    command.add_argument("--timeout", type=float, default=20)
+    command.add_argument("--max-bytes", type=int, default=1_000_000)
+    command.set_defaults(handler=source_check)
 
     command = commands.add_parser("agent-queue", help="Build the structured research queue")
     command.add_argument("--output")

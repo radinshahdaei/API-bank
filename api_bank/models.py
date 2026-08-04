@@ -20,6 +20,7 @@ PROTOCOLS = {
 }
 AUTH_MODES = {"none", "api_key", "unknown"}
 FREE_TIERS = {"unknown", "claimed", "documented", "observed_no_auth"}
+SOURCE_KINDS = {"api_docs", "pricing", "models", "changelog", "candidate_evidence", "other"}
 
 
 def utc_now() -> str:
@@ -98,6 +99,56 @@ class ProbeResult:
     error: Optional[str] = None
     auth_used: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class WatchedSource:
+    provider: str
+    url: str
+    kind: str = "candidate_evidence"
+    status: str = "pending"
+    first_seen: str = field(default_factory=utc_now)
+    last_checked: Optional[str] = None
+    last_changed: Optional[str] = None
+    content_hash: Optional[str] = None
+    etag: Optional[str] = None
+    last_modified: Optional[str] = None
+    error: Optional[str] = None
+    id: str = ""
+
+    def __post_init__(self) -> None:
+        self.provider = self.provider.strip()
+        self.url = normalize_base_url(self.url)
+        if self.kind not in SOURCE_KINDS:
+            raise ValueError(f"Unsupported source kind: {self.kind}")
+        if not self.id:
+            self.id = hashlib.sha256(self.url.encode("utf-8")).hexdigest()[:16]
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "WatchedSource":
+        allowed = cls.__dataclass_fields__.keys()
+        return cls(**{key: item for key, item in value.items() if key in allowed})
+
+
+@dataclass
+class SourceCheck:
+    source_id: str
+    status: str
+    checked_at: str = field(default_factory=utc_now)
+    http_status: Optional[int] = None
+    latency_ms: Optional[float] = None
+    content_hash: Optional[str] = None
+    changed: bool = False
+    etag: Optional[str] = None
+    last_modified: Optional[str] = None
+    content_type: Optional[str] = None
+    error: Optional[str] = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

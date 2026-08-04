@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterable, Optional
 
-from .models import Candidate, ProbeResult, utc_now
+from .models import Candidate, ProbeResult, SourceCheck, WatchedSource, utc_now
 
 
 DEFAULT_DB = Path(".api-bank/state.db")
@@ -84,6 +84,36 @@ class Store:
             );
             CREATE INDEX IF NOT EXISTS probes_candidate_tested
                 ON probes(candidate_id, tested_at DESC);
+            CREATE TABLE IF NOT EXISTS sources (
+                id TEXT PRIMARY KEY,
+                provider TEXT NOT NULL,
+                url TEXT NOT NULL UNIQUE,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                first_seen TEXT NOT NULL,
+                last_checked TEXT,
+                last_changed TEXT,
+                content_hash TEXT,
+                etag TEXT,
+                last_modified TEXT,
+                error TEXT
+            );
+            CREATE TABLE IF NOT EXISTS source_checks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id TEXT NOT NULL REFERENCES sources(id),
+                status TEXT NOT NULL,
+                checked_at TEXT NOT NULL,
+                http_status INTEGER,
+                latency_ms REAL,
+                content_hash TEXT,
+                changed INTEGER NOT NULL DEFAULT 0,
+                etag TEXT,
+                last_modified TEXT,
+                content_type TEXT,
+                error TEXT
+            );
+            CREATE INDEX IF NOT EXISTS source_checks_source_checked
+                ON source_checks(source_id, checked_at DESC);
             """
         )
         self.connection.commit()
@@ -190,3 +220,77 @@ class Store:
             ORDER BY c.provider COLLATE NOCASE, c.model COLLATE NOCASE
             """
         )
+
+    def upsert_source(self, source: WatchedSource) -> bool:
+        existing = self.connection.execute(
+            "SELECT * FROM sources WHERE id = ?", (source.id,)
+        ).fetchone()
+        if existing:
+            previous = WatchedSource.from_dict(dict(existing))
+            source.first_seen = previous.first_seen
+            source.status = previous.status
+            source.last_checked = previous.last_checked
+            source.last_changed = previous.last_changed
+            source.content_hash = previous.content_hash
+            source.etag = previous.etag
+            source.last_modified = previous.last_modified
+            source.error = previous.error
+        value = source.as_dict()
+        columns = list(value)
+        assignments = ", ".join(f"{column}=excluded.{column}" for column in columns if column != "id")
+        self.connection.execute(
+            f"INSERT INTO sources ({', '.join(columns)}) "
+            f"VALUES ({', '.join('?' for _ in columns)}) "
+            f"ON CONFLICT(id) DO UPDATE SET {assignments}",
+            [value[column] for column in columns],
+        )
+        self.connection.commit()
+        return existing is None
+
+    def get_source(self, source_id: str) -> Optional[WatchedSource]:
+        row = self.connection.execute("SELECT * FROM sources WHERE id = ?", (source_id,)).fetchone()
+        return WatchedSource.from_dict(dict(row)) if row else None
+
+    def list_sources(self, status: Optional[str] = None) -> list[WatchedSource]:
+        sql = "SELECT * FROM sources"
+        params: tuple[str, ...] = ()
+        if status:
+            sql += " WHERE status = ?"
+            params = (status,)
+        sql += " ORDER BY provider COLLATE NOCASE, url"
+        return [WatchedSource.from_dict(dict(row)) for row in self.connection.execute(sql, params)]
+
+    def add_source_check(self, check: SourceCheck) -> None:
+        value = check.as_dict()
+        value["changed"] = int(value["changed"])
+        columns = list(value)
+        self.connection.execute(
+            f"INSERT INTO source_checks ({', '.join(columns)}) "
+            f"VALUES ({', '.join('?' for _ in columns)})",
+            [value[column] for column in columns],
+        )
+        status = "changed" if check.changed else check.status
+        changed_at = check.checked_at if check.changed else None
+        self.connection.execute(
+            """
+            UPDATE sources
+            SET status = ?, last_checked = ?,
+                last_changed = COALESCE(?, last_changed),
+                content_hash = COALESCE(?, content_hash),
+                etag = COALESCE(?, etag),
+                last_modified = COALESCE(?, last_modified),
+                error = ?
+            WHERE id = ?
+            """,
+            (
+                status,
+                check.checked_at,
+                changed_at,
+                check.content_hash,
+                check.etag,
+                check.last_modified,
+                check.error,
+                check.source_id,
+            ),
+        )
+        self.connection.commit()

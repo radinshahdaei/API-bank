@@ -39,24 +39,19 @@ class Prober:
 
     def probe_chat(self, candidate: Candidate, with_auth: bool = False) -> ProbeResult:
         validate_probe_target(candidate.base_url, self.allow_http)
+        if candidate.protocol != "openai-chat":
+            return ProbeResult(
+                candidate.id,
+                "chat",
+                "skipped",
+                error=f"No {candidate.protocol} probe adapter is available yet",
+            )
         if not candidate.model:
             return ProbeResult(candidate.id, "chat", "skipped", error="No model configured")
 
-        headers = {"Content-Type": "application/json", "Accept": "application/json"}
-        auth_used = False
-        if with_auth:
-            if not candidate.api_key_env:
-                return ProbeResult(candidate.id, "chat", "skipped", error="No API key environment variable configured")
-            api_key = os.environ.get(candidate.api_key_env)
-            if not api_key:
-                return ProbeResult(
-                    candidate.id,
-                    "chat",
-                    "skipped",
-                    error=f"Environment variable {candidate.api_key_env} is not set",
-                )
-            headers["Authorization"] = f"Bearer {api_key}"
-            auth_used = True
+        headers, auth_used, auth_error = self._headers(candidate, with_auth)
+        if auth_error:
+            return auth_error
 
         url = f"{candidate.base_url}/chat/completions"
         payload = {
@@ -126,6 +121,106 @@ class Prober:
             auth_used=auth_used,
         )
 
+    def probe_models(self, candidate: Candidate, with_auth: bool = False) -> ProbeResult:
+        """Enumerate an OpenAI-compatible model catalog without selecting a model."""
+        validate_probe_target(candidate.base_url, self.allow_http)
+        if candidate.protocol != "openai-chat":
+            return ProbeResult(
+                candidate.id,
+                "models",
+                "skipped",
+                error=f"No {candidate.protocol} model-list adapter is available yet",
+            )
+        headers, auth_used, auth_error = self._headers(candidate, with_auth)
+        if auth_error:
+            auth_error.request_kind = "models"
+            return auth_error
+        started = time.monotonic()
+        try:
+            response = self.session.get(
+                f"{candidate.base_url}/models",
+                headers=headers,
+                timeout=self.timeout,
+                allow_redirects=False,
+            )
+        except requests.Timeout:
+            result = self._error(candidate, started, "timeout", "Request timed out", auth_used)
+            result.request_kind = "models"
+            return result
+        except requests.RequestException as exc:
+            result = self._error(candidate, started, "network_error", str(exc), auth_used)
+            result.request_kind = "models"
+            return result
+
+        latency = round((time.monotonic() - started) * 1000, 1)
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                raw_models = data["data"]
+                models = sorted(
+                    {
+                        item["id"].strip()
+                        for item in raw_models
+                        if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"].strip()
+                    }
+                )
+            except (ValueError, KeyError, TypeError) as exc:
+                return ProbeResult(
+                    candidate.id,
+                    "models",
+                    "invalid_response",
+                    http_status=200,
+                    latency_ms=latency,
+                    error=f"Invalid OpenAI-compatible model list: {exc}",
+                    auth_used=auth_used,
+                )
+            return ProbeResult(
+                candidate.id,
+                "models",
+                "working",
+                http_status=200,
+                latency_ms=latency,
+                auth_used=auth_used,
+                metadata={"models": models[:500], "model_count": len(models)},
+            )
+
+        mapped = {
+            401: "auth_required",
+            403: "auth_required",
+            404: "not_found",
+            408: "timeout",
+            429: "rate_limited",
+        }.get(response.status_code, "server_error" if response.status_code >= 500 else "rejected")
+        return ProbeResult(
+            candidate.id,
+            "models",
+            mapped,
+            http_status=response.status_code,
+            latency_ms=latency,
+            error=response.text[:300],
+            auth_used=auth_used,
+        )
+
+    @staticmethod
+    def _headers(candidate: Candidate, with_auth: bool):
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if not with_auth:
+            return headers, False, None
+        if not candidate.api_key_env:
+            return headers, False, ProbeResult(
+                candidate.id, "chat", "skipped", error="No API key environment variable configured"
+            )
+        api_key = os.environ.get(candidate.api_key_env)
+        if not api_key:
+            return headers, False, ProbeResult(
+                candidate.id,
+                "chat",
+                "skipped",
+                error=f"Environment variable {candidate.api_key_env} is not set",
+            )
+        headers["Authorization"] = f"Bearer {api_key}"
+        return headers, True, None
+
     @staticmethod
     def _error(
         candidate: Candidate,
@@ -142,4 +237,3 @@ class Prober:
             error=error[:300],
             auth_used=auth_used,
         )
-

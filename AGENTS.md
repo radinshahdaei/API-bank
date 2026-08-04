@@ -26,8 +26,10 @@ verified registry.
 3. Research unresolved fields using current primary sources and emit JSON conforming to
    `schemas/agent-findings.schema.json`.
 4. Ingest findings with `python -m api_bank discover --source file --input <file>`.
-5. Run the smallest relevant no-auth probe with `python -m api_bank probe --id <id>`.
-6. Review state using `python -m api_bank report` and export only recent working endpoints
+5. Enumerate model IDs when supported with `python -m api_bank models --id <id>`.
+6. Run the smallest relevant no-auth probe with `python -m api_bank probe --id <id>`.
+7. Refresh evidence watches with `source-sync` and `source-check`.
+8. Review state using `python -m api_bank report` and export only recent working endpoints
    with `python -m api_bank export`.
 
 The SQLite database under `.api-bank/` is runtime state. Do not edit it directly. Change
@@ -40,4 +42,3 @@ schemas, adapters, policies, or tracked registry exports instead.
 - Run `python -m py_compile api_bank/*.py pipeline.py providers.py` after Python changes.
 - Preserve the legacy `pipeline.py` interface until it is deliberately migrated to consume
   the new verified registry.
-

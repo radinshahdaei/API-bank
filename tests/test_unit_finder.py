@@ -8,21 +8,32 @@ from unittest.mock import patch
 import requests
 
 from api_bank.discovery import candidates_from_file
-from api_bank.models import Candidate, ProbeResult
+from api_bank.models import Candidate, ProbeResult, WatchedSource
 from api_bank.probe import Prober, validate_probe_target
+from api_bank.sources import SourceWatcher
 from api_bank.store import Store
 
 
 class FakeResponse:
-    def __init__(self, status_code=200, payload=None, text=""):
+    def __init__(self, status_code=200, payload=None, text="", headers=None, content=None):
         self.status_code = status_code
         self._payload = payload
         self.text = text
+        self.headers = headers or {}
+        self.content = content if content is not None else text.encode()
+        self.closed = False
 
     def json(self):
         if isinstance(self._payload, Exception):
             raise self._payload
         return self._payload
+
+    def iter_content(self, chunk_size=65536):
+        for offset in range(0, len(self.content), chunk_size):
+            yield self.content[offset : offset + chunk_size]
+
+    def close(self):
+        self.closed = True
 
 
 class FakeSession:
@@ -35,6 +46,20 @@ class FakeSession:
         if isinstance(self.response, Exception):
             raise self.response
         return self.response
+
+    def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        if isinstance(self.response, Exception):
+            raise self.response
+        return self.response
+
+
+class SequenceSession:
+    def __init__(self, responses):
+        self.responses = iter(responses)
+
+    def get(self, _url, **_kwargs):
+        return next(self.responses)
 
 
 class CandidateTests(unittest.TestCase):
@@ -139,6 +164,27 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(saved.free_tier, "documented")
         self.assertEqual(saved.source_url, "https://example.com/official-docs")
 
+    def test_watched_source_retains_change_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with Store(Path(directory, "state.db")) as store:
+                source = WatchedSource(provider="Example", url="https://example.com/docs")
+                self.assertTrue(store.upsert_source(source))
+                first = SourceWatcher(
+                    session=FakeSession(FakeResponse(content=b"version one"))
+                ).check(source)
+                store.add_source_check(first)
+                saved = store.get_source(source.id)
+                second = SourceWatcher(
+                    session=FakeSession(FakeResponse(content=b"version two"))
+                ).check(saved)
+                store.add_source_check(second)
+                changed = store.get_source(source.id)
+
+        self.assertFalse(first.changed)
+        self.assertTrue(second.changed)
+        self.assertEqual(changed.status, "changed")
+        self.assertIsNotNone(changed.last_changed)
+
 
 class ProbeTests(unittest.TestCase):
     def test_rejects_private_targets(self):
@@ -194,6 +240,45 @@ class ProbeTests(unittest.TestCase):
         )
         result = Prober(session=session).probe_chat(candidate)
         self.assertEqual(result.status, "timeout")
+
+    def test_model_enumeration_deduplicates_and_sorts_ids(self):
+        session = FakeSession(
+            FakeResponse(
+                payload={"data": [{"id": "model-b"}, {"id": "model-a"}, {"id": "model-a"}]}
+            )
+        )
+        candidate = Candidate(
+            provider="Example",
+            base_url="https://api.example.com/v1",
+            model="old-model",
+        )
+        result = Prober(session=session).probe_models(candidate)
+        self.assertEqual(result.status, "working")
+        self.assertEqual(result.metadata["models"], ["model-a", "model-b"])
+        self.assertEqual(result.metadata["model_count"], 2)
+
+
+class SourceWatcherTests(unittest.TestCase):
+    def test_unchanged_response_uses_conditional_headers(self):
+        source = WatchedSource(
+            provider="Example",
+            url="https://example.com/docs",
+            content_hash="abc",
+            etag='"v1"',
+        )
+        session = FakeSession(FakeResponse(status_code=304, headers={"ETag": '"v1"'}))
+        result = SourceWatcher(session=session).check(source)
+        self.assertEqual(result.status, "unchanged")
+        self.assertFalse(result.changed)
+        _url, kwargs = session.calls[0]
+        self.assertEqual(kwargs["headers"]["If-None-Match"], '"v1"')
+        self.assertFalse(kwargs["allow_redirects"])
+
+    def test_oversized_source_is_not_hashed(self):
+        source = WatchedSource(provider="Example", url="https://example.com/docs")
+        response = FakeResponse(headers={"Content-Length": "101"}, content=b"small")
+        result = SourceWatcher(max_bytes=100, session=FakeSession(response)).check(source)
+        self.assertEqual(result.status, "too_large")
 
 
 if __name__ == "__main__":
