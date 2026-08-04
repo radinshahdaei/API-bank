@@ -31,12 +31,16 @@ import argparse
 import threading
 import itertools
 import random
+import hashlib
+from pathlib import Path
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional
 
 import requests
+
+from api_bank.probe import validate_probe_target
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -54,25 +58,37 @@ class RateLimiter:
         self._last_request = 0.0
         self._hour_requests: list[float] = []
 
-    def acquire(self):
-        """Block until a request slot is available."""
+    @staticmethod
+    def _wait(seconds: float, cancel_event: Optional[threading.Event]) -> bool:
+        if seconds <= 0:
+            return True
+        if cancel_event is None:
+            time.sleep(seconds)
+            return True
+        return not cancel_event.wait(seconds)
+
+    def acquire(self, cancel_event: Optional[threading.Event] = None) -> bool:
+        """Block until a request slot is available, or return False when cancelled."""
         with self._lock:
             now = time.time()
             wait = self._min_interval - (now - self._last_request)
+            if wait > 0 and not self._wait(wait, cancel_event):
+                return False
             if wait > 0:
-                time.sleep(wait)
                 now = time.time()
             if self.rph:
                 self._hour_requests = [t for t in self._hour_requests if now - t < 3600]
                 if len(self._hour_requests) >= self.rph:
                     oldest = self._hour_requests[0]
                     wait_hour = 3600 - (now - oldest) + 1
+                    if wait_hour > 0 and not self._wait(wait_hour, cancel_event):
+                        return False
                     if wait_hour > 0:
-                        time.sleep(wait_hour)
                         now = time.time()
                         self._hour_requests = [t for t in self._hour_requests if now - t < 3600]
             self._last_request = now
             self._hour_requests.append(now)
+            return True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -87,11 +103,21 @@ class Endpoint:
     timeout: int = 120
     completion_path: str = "/chat/completions"
     extra_headers: dict = field(default_factory=dict)
+    api_key_env: Optional[str] = None
 
     def generate(self, prompt: str, max_tokens: int = 512,
                  temperature: float = 0.8, retries: int = 2) -> dict:
         """Send a generation request with retry on rate limit."""
         headers = {"Content-Type": "application/json", **self.extra_headers}
+        if self.api_key_env:
+            api_key = os.environ.get(self.api_key_env)
+            if not api_key:
+                return {
+                    "status": "error",
+                    "error": f"Environment variable {self.api_key_env} is not set",
+                    "latency_ms": None,
+                }
+            headers["Authorization"] = f"Bearer {api_key}"
         payload = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
@@ -212,6 +238,8 @@ _LIMITERS = {
     "Zen": _zen_limiter,
 }
 
+_DYNAMIC_LIMITERS: dict[str, RateLimiter] = {}
+
 FLAKY_ENDPOINTS = []
 
 
@@ -220,8 +248,41 @@ def get_limiter_for(endpoint: Endpoint) -> RateLimiter:
     for prefix, limiter in _LIMITERS.items():
         if endpoint.name.startswith(prefix):
             return limiter
-    # Fallback: per-endpoint limiter (conservative)
-    return RateLimiter(rpm=2)
+    # Fallback: conservative limiter shared by every model on the same base URL.
+    if endpoint.base_url not in _DYNAMIC_LIMITERS:
+        _DYNAMIC_LIMITERS[endpoint.base_url] = RateLimiter(rpm=2)
+    return _DYNAMIC_LIMITERS[endpoint.base_url]
+
+
+def load_registry_endpoints(filepath: str, include_auth: bool = False) -> list[Endpoint]:
+    """Load generation-compatible endpoints from a finder verified export."""
+    with open(filepath) as file:
+        registry = json.load(file)
+    endpoints = []
+    for item in registry.get("endpoints", []):
+        if item.get("protocol") != "openai-chat" or not item.get("model"):
+            continue
+        try:
+            validate_probe_target(item["base_url"])
+        except (KeyError, ValueError):
+            continue
+        auth_mode = item.get("auth_mode", "unknown")
+        if auth_mode != "none" and not include_auth:
+            continue
+        api_key_env = item.get("api_key_env") if auth_mode != "none" else None
+        if api_key_env and not os.environ.get(api_key_env):
+            continue
+        provider = item.get("provider", "Registry")
+        suffix = item.get("id", "")[:8]
+        endpoints.append(
+            Endpoint(
+                name=f"{provider}-{item['model']}-{suffix}".strip("-"),
+                base_url=item["base_url"],
+                model=item["model"],
+                api_key_env=api_key_env,
+            )
+        )
+    return endpoints
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -284,7 +345,7 @@ class Pipeline:
 
     @staticmethod
     def _prompt_hash(prompt: str) -> str:
-        return str(hash(prompt))
+        return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:20]
 
     def _load_completed(self):
         if not os.path.exists(self.output_path):
@@ -297,18 +358,21 @@ class Pipeline:
                     continue
                 try:
                     rec = json.loads(line)
-                    # Old format: (endpoint, prompt_hash). New format: (endpoint, dedup_key).
-                    # For resume on old files, treat prompt_hash as rep0
-                    ph = rec["prompt_hash"]
-                    self._completed.add((rec["endpoint"], f"{ph}__rep0"))
+                    if rec.get("status") != "ok":
+                        continue
+                    dedup_key = rec.get("dedup_key")
+                    if not dedup_key:
+                        dedup_key = f"{rec['prompt_hash']}__rep0"
+                    self._completed.add((rec["endpoint"], dedup_key))
                     count += 1
                 except (json.JSONDecodeError, KeyError):
                     pass
         if count:
-            print(f"📂 Resumed: {count} already-completed generations found (as rep0)")
+            print(f"📂 Resumed: {count} successful generations found")
 
     def _save_result(self, record: dict, dedup_key: str):
         with self._lock:
+            Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
             with open(self.output_path, "a") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
             self._completed.add((record["endpoint"], dedup_key))
@@ -323,6 +387,7 @@ class Pipeline:
             "model": endpoint.model,
             "prompt": prompt,
             "prompt_hash": ph,
+            "dedup_key": dedup_key,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "status": None,
             "generation": None,
@@ -336,7 +401,10 @@ class Pipeline:
             return record, dedup_key
 
         # Shared rate limiter ensures we don't exceed per-IP limits
-        limiter.acquire()
+        if not limiter.acquire(self._shutdown):
+            record["status"] = "cancelled"
+            record["error"] = "Pipeline shutdown requested"
+            return record, dedup_key
 
         result = endpoint.generate(prompt, self.max_tokens, self.temperature)
         record.update({
@@ -354,22 +422,36 @@ class Pipeline:
 
     def _build_jobs(self) -> list[tuple[Endpoint, str, str, RateLimiter]]:
         """Build (endpoint, prompt, dedup_key, limiter) tuples, filtering completed."""
-        jobs = []
+        endpoint_jobs = []
         for ep in self.endpoints:
+            jobs = []
             limiter = get_limiter_for(ep)
-            limit = self.max_per_endpoint or (len(self.prompts) * self.repeat)
-            count = 0
+            limit = (
+                self.max_per_endpoint
+                if self.max_per_endpoint is not None
+                else len(self.prompts) * self.repeat
+            )
+            selected = 0
             for rep in range(self.repeat):
                 for prompt in self.prompts:
-                    if count >= limit:
+                    if selected >= limit:
                         break
+                    selected += 1
                     dedup_key = f"{self._prompt_hash(prompt)}__rep{rep}"
                     key = (ep.name, dedup_key)
                     if key not in self._completed and not self._shutdown.is_set():
                         jobs.append((ep, prompt, dedup_key, limiter))
-                        count += 1
-                if count >= limit:
+                if selected >= limit:
                     break
+            endpoint_jobs.append(jobs)
+
+        # Round-robin prevents a slow first provider from occupying every worker.
+        jobs = []
+        longest = max((len(items) for items in endpoint_jobs), default=0)
+        for index in range(longest):
+            for items in endpoint_jobs:
+                if index < len(items):
+                    jobs.append(items[index])
         return jobs
 
     def run(self):
@@ -398,7 +480,7 @@ class Pipeline:
             self._shutdown.set()
         signal.signal(signal.SIGINT, _on_sigint)
 
-        completed = errors = rate_limited = 0
+        completed = errors = rate_limited = dry_runs = cancelled = 0
         max_workers = min(len(self.endpoints), 15)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -430,19 +512,22 @@ class Pipeline:
                 elif record["status"] == "rate_limited":
                     rate_limited += 1
                 elif record["status"] == "dry_run":
-                    pass
+                    dry_runs += 1
+                elif record["status"] == "cancelled":
+                    cancelled += 1
                 else:
                     errors += 1
 
                 if not self.dry_run and record["status"] not in ("dry_run",):
                     self._save_result(record, dedup_key)
 
-                total_done = completed + errors + rate_limited
+                total_done = completed + errors + rate_limited + dry_runs + cancelled
                 pct = total_done / total_jobs * 100
                 elapsed = time.time() - self._start_time
                 rate = total_done / elapsed * 60 if elapsed > 0 else 0
-                eta = (total_jobs - total_done) / rate if rate > 0 else 0
-                icon = {"ok": "✅", "rate_limited": "🚦", "error": "❌", "timeout": "⏱️"}.get(
+                eta = ((total_jobs - total_done) / rate * 60) if rate > 0 else 0
+                icon = {"ok": "✅", "rate_limited": "🚦", "error": "❌", "timeout": "⏱️",
+                        "dry_run": "🔍", "cancelled": "⏸️"}.get(
                     record["status"], "❓")
                 preview = (record.get("generation") or "")[:60].replace("\n", " ")
                 print(f"\r  {icon} [{total_done}/{total_jobs}] {pct:5.1f}% | "
@@ -458,6 +543,10 @@ class Pipeline:
         print(f"  ✅ Succeeded:     {completed}")
         print(f"  🚦 Rate limited:  {rate_limited}")
         print(f"  ❌ Errors:        {errors}")
+        if dry_runs:
+            print(f"  🔍 Dry-run jobs:  {dry_runs}")
+        if cancelled:
+            print(f"  ⏸️  Cancelled:     {cancelled}")
         print(f"  ⏱️  Time:          {elapsed:.0f}s ({elapsed/60:.1f} min)")
         if completed > 0:
             print(f"  📊 Throughput:    {completed / elapsed * 60:.1f} gen/min")
@@ -509,6 +598,10 @@ def main():
                    help="Filter endpoints (prefix match)")
     g.add_argument("--include-flaky", action="store_true",
                    help="Include flaky endpoints")
+    g.add_argument("--registry", type=str,
+                   help="Finder verified export to use instead of hard-coded endpoints")
+    g.add_argument("--registry-with-auth", action="store_true",
+                   help="Allow registry endpoints that use configured API keys")
 
     g = parser.add_argument_group("Runtime")
     g.add_argument("--resume", action="store_true",
@@ -520,16 +613,27 @@ def main():
 
     args = parser.parse_args()
 
+    if args.repeat < 1:
+        parser.error("--repeat must be at least 1")
+    if args.max_per_endpoint is not None and args.max_per_endpoint < 0:
+        parser.error("--max-per-endpoint cannot be negative")
+
+    configured_endpoints = (
+        load_registry_endpoints(args.registry, args.registry_with_auth)
+        if args.registry
+        else list(ENDPOINTS)
+    )
+
     if args.list_endpoints:
         print("Configured endpoints:\n")
-        for ep in ENDPOINTS:
+        for ep in configured_endpoints:
             lim = get_limiter_for(ep)
             print(f"  {ep.name:30s} {ep.model:45s} (shared RPM={lim.rpm})")
         if FLAKY_ENDPOINTS:
             print(f"\n  Flaky endpoints (use --include-flaky):")
             for ep in FLAKY_ENDPOINTS:
                 print(f"  {ep.name:30s} {ep.model}")
-        print(f"\n  Total: {len(ENDPOINTS)} stable + {len(FLAKY_ENDPOINTS)} flaky")
+        print(f"\n  Total: {len(configured_endpoints)} configured + {len(FLAKY_ENDPOINTS)} flaky")
         return
 
     # Load prompts
@@ -554,7 +658,7 @@ def main():
         sys.exit(1)
 
     # Select endpoints
-    endpoints = list(ENDPOINTS)
+    endpoints = configured_endpoints
     if args.include_flaky:
         endpoints += FLAKY_ENDPOINTS
     if args.endpoint:
@@ -565,6 +669,10 @@ def main():
             print(f"❌ No endpoints match: {args.endpoint}")
             sys.exit(1)
         print(f"🎯 {len(endpoints)} endpoints: {[e.name for e in endpoints]}")
+
+    if not endpoints:
+        print("❌ No generation-compatible endpoints are available.")
+        sys.exit(1)
 
     # Run
     Pipeline(

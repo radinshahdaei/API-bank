@@ -40,5 +40,4 @@ schemas, adapters, policies, or tracked registry exports instead.
 - Tests must be offline and deterministic unless explicitly marked as live probes.
 - Run `python -m unittest discover -s tests -p 'test_unit_*.py'` after changing finder code.
 - Run `python -m py_compile api_bank/*.py pipeline.py providers.py` after Python changes.
-- Preserve the legacy `pipeline.py` interface until it is deliberately migrated to consume
-  the new verified registry.
+- Preserve both the legacy hard-coded endpoint mode and `pipeline.py --registry` compatibility.

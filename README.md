@@ -85,7 +85,16 @@ python pipeline.py \
 ```
 
 The next migration will make this generator consume the new recent verified export instead of
-maintaining its own hard-coded endpoint list.
+maintaining its own hard-coded endpoint list. That migration is available with `--registry`:
+
+```bash
+python -m api_bank export --output docs/verified_endpoints.v2.json
+python pipeline.py --registry docs/verified_endpoints.v2.json \
+  --prompts prompts.txt --output dataset.jsonl
+```
+
+Registry mode defaults to no-auth OpenAI-compatible endpoints. Authenticated registry entries
+require `--registry-with-auth` and their configured environment variable.
 
 ## Project structure
 

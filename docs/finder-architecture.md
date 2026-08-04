@@ -81,5 +81,6 @@ same least-privilege and domain-restriction policy. See the official Codex docum
    characterization and deeper response-quality scoring remain future work.
 5. **Automation:** scheduled research/probe runs, reviewable diffs, and notifications for newly
    verified or newly failing endpoints.
-6. **Generator migration:** make `pipeline.py` consume the recent verified export and fix its
-   resume and scheduling behavior.
+6. **Generator migration (complete):** `pipeline.py --registry` consumes recent verified exports;
+   resume keys are stable, repeat identity is persisted, scheduling is provider-fair, and rate
+   waits are interruptible.
