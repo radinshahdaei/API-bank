@@ -1,0 +1,216 @@
+{
+  "endpoints": [
+    {
+      "account_id_env": null,
+      "api_key_env": null,
+      "auth_mode": "none",
+      "base_url": "https://api.kilo.ai/api/gateway",
+      "evidence_summary": "Previously verified by the legacy API Bank test scripts.",
+      "first_seen": "2026-08-04T21:02:16.222356+00:00",
+      "free_tier": "observed_no_auth",
+      "id": "e2e7a8bdb9cb00bf",
+      "last_seen": "2026-08-05T04:59:16.316537+00:00",
+      "model": "inclusionai/ling-3.0-flash:free",
+      "notes": null,
+      "protocol": "openai-chat",
+      "provider": "Kilo",
+      "source_kind": "legacy_verified",
+      "source_url": "docs/verified_endpoints.json",
+      "status": "verified",
+      "verification": {
+        "eligible": true,
+        "free_evidence": "observed_no_auth",
+        "latest_probe": {
+          "auth_used": false,
+          "candidate_id": "e2e7a8bdb9cb00bf",
+          "error": null,
+          "http_status": 200,
+          "id": 20,
+          "latency_ms": 1511.5,
+          "metadata": {
+            "finish_reason": "length"
+          },
+          "model_returned": "inclusionai/ling-3.0-flash-free",
+          "request_kind": "chat",
+          "response_preview": "1.  **Analyze the Request:**\n    *   User's input: \"Reply with exactly: API_BANK_OK\"\n    *   Constraint: Reply",
+          "status": "working",
+          "tested_at": "2026-08-05T04:59:16.314188+00:00"
+        },
+        "reasons": [],
+        "recent_probes": 3,
+        "recent_successes": 2
+      }
+    },
+    {
+      "account_id_env": null,
+      "api_key_env": null,
+      "auth_mode": "none",
+      "base_url": "https://api.kilo.ai/api/gateway",
+      "evidence_summary": "Previously verified by the legacy API Bank test scripts.",
+      "first_seen": "2026-08-04T21:02:16.222346+00:00",
+      "free_tier": "observed_no_auth",
+      "id": "189b388b142391f2",
+      "last_seen": "2026-08-05T04:51:18.125026+00:00",
+      "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+      "notes": null,
+      "protocol": "openai-chat",
+      "provider": "Kilo",
+      "source_kind": "legacy_verified",
+      "source_url": "docs/verified_endpoints.json",
+      "status": "verified",
+      "verification": {
+        "eligible": true,
+        "free_evidence": "observed_no_auth",
+        "latest_probe": {
+          "auth_used": false,
+          "candidate_id": "189b388b142391f2",
+          "error": null,
+          "http_status": 200,
+          "id": 11,
+          "latency_ms": 1041.4,
+          "metadata": {
+            "finish_reason": "stop"
+          },
+          "model_returned": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+          "request_kind": "chat",
+          "response_preview": "API_BANK_OK",
+          "status": "working",
+          "tested_at": "2026-08-05T04:51:18.124135+00:00"
+        },
+        "reasons": [],
+        "recent_probes": 2,
+        "recent_successes": 1
+      }
+    },
+    {
+      "account_id_env": null,
+      "api_key_env": null,
+      "auth_mode": "none",
+      "base_url": "https://api.kilo.ai/api/gateway",
+      "evidence_summary": "200 req/hr per IP. Auto-routing to best free model.",
+      "first_seen": "2026-08-04T21:02:16.222171+00:00",
+      "free_tier": "observed_no_auth",
+      "id": "0aafe83fcff3aac7",
+      "last_seen": "2026-08-05T04:51:19.188213+00:00",
+      "model": "kilo-auto/free",
+      "notes": null,
+      "protocol": "openai-chat",
+      "provider": "Kilo Gateway",
+      "source_kind": "legacy_catalog",
+      "source_url": "docs/catalog.md",
+      "status": "verified",
+      "verification": {
+        "eligible": true,
+        "free_evidence": "observed_no_auth",
+        "latest_probe": {
+          "auth_used": false,
+          "candidate_id": "0aafe83fcff3aac7",
+          "error": null,
+          "http_status": 200,
+          "id": 12,
+          "latency_ms": 1060.6,
+          "metadata": {
+            "finish_reason": "stop"
+          },
+          "model_returned": "poolside/laguna-s-2.1:free",
+          "request_kind": "chat",
+          "response_preview": "API_BANK_OK",
+          "status": "working",
+          "tested_at": "2026-08-05T04:51:19.187138+00:00"
+        },
+        "reasons": [],
+        "recent_probes": 2,
+        "recent_successes": 1
+      }
+    },
+    {
+      "account_id_env": null,
+      "api_key_env": null,
+      "auth_mode": "none",
+      "base_url": "https://api.llm7.io/v1",
+      "evidence_summary": "Previously verified by the legacy API Bank test scripts.",
+      "first_seen": "2026-08-04T21:02:16.222365+00:00",
+      "free_tier": "observed_no_auth",
+      "id": "13aac28b069b2b55",
+      "last_seen": "2026-08-05T04:53:16.417217+00:00",
+      "model": "codestral-latest",
+      "notes": "Discovered from https://api.llm7.io/v1/models",
+      "protocol": "openai-chat",
+      "provider": "LLM7",
+      "source_kind": "legacy_verified",
+      "source_url": "docs/verified_endpoints.json",
+      "status": "verified",
+      "verification": {
+        "eligible": true,
+        "free_evidence": "observed_no_auth",
+        "latest_probe": {
+          "auth_used": false,
+          "candidate_id": "13aac28b069b2b55",
+          "error": null,
+          "http_status": 200,
+          "id": 13,
+          "latency_ms": 829.7,
+          "metadata": {
+            "finish_reason": "stop"
+          },
+          "model_returned": "codestral-latest",
+          "request_kind": "chat",
+          "response_preview": "API_BANK_OK",
+          "status": "working",
+          "tested_at": "2026-08-05T04:51:20.019359+00:00"
+        },
+        "reasons": [],
+        "recent_probes": 2,
+        "recent_successes": 1
+      }
+    },
+    {
+      "account_id_env": null,
+      "api_key_env": null,
+      "auth_mode": "none",
+      "base_url": "https://opencode.ai/zen/v1",
+      "evidence_summary": "Previously verified by the legacy API Bank test scripts.",
+      "first_seen": "2026-08-04T21:02:16.222391+00:00",
+      "free_tier": "observed_no_auth",
+      "id": "06a9a6df3aa664dd",
+      "last_seen": "2026-08-05T04:51:43.082058+00:00",
+      "model": "nemotron-3-ultra-free",
+      "notes": null,
+      "protocol": "openai-chat",
+      "provider": "Zen",
+      "source_kind": "legacy_verified",
+      "source_url": "docs/verified_endpoints.json",
+      "status": "verified",
+      "verification": {
+        "eligible": true,
+        "free_evidence": "observed_no_auth",
+        "latest_probe": {
+          "auth_used": false,
+          "candidate_id": "06a9a6df3aa664dd",
+          "error": null,
+          "http_status": 200,
+          "id": 18,
+          "latency_ms": 1463.5,
+          "metadata": {
+            "finish_reason": "length"
+          },
+          "model_returned": "nemotron-3-ultra-free",
+          "request_kind": "chat",
+          "response_preview": "The user asks: \"Reply with exactly",
+          "status": "working",
+          "tested_at": "2026-08-05T04:51:43.080935+00:00"
+        },
+        "reasons": [],
+        "recent_probes": 2,
+        "recent_successes": 1
+      }
+    }
+  ],
+  "generated_at": "2026-08-05T05:00:12.501777+00:00",
+  "policy": {
+    "max_probe_age_days": 7,
+    "meaning": "The latest probe worked and all configured evidence gates passed.",
+    "min_recent_successes": 1,
+    "require_free_evidence": true
+  }
+}

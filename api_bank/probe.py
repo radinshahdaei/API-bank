@@ -65,9 +65,10 @@ class Prober:
         payload = {
             "model": candidate.model,
             "messages": [{"role": "user", "content": PROBE_PROMPT}],
-            "max_tokens": 8,
+            "max_tokens": 32,
             "temperature": 0,
             "stream": False,
+            "reasoning_effort": "none",
         }
         response, latency_or_error = self._post(
             candidate,
@@ -79,6 +80,19 @@ class Prober:
         if response is None:
             return latency_or_error
         latency = latency_or_error
+        if response.status_code == 400:
+            # Some compatible APIs reject reasoning_effort. Retry once without it.
+            payload.pop("reasoning_effort")
+            response, latency_or_error = self._post(
+                candidate,
+                f"{candidate.base_url}/chat/completions",
+                headers,
+                payload,
+                bool(key),
+            )
+            if response is None:
+                return latency_or_error
+            latency += latency_or_error
         if response.status_code != 200:
             return self._http_failure(candidate, response, latency, bool(key))
         try:
@@ -342,6 +356,18 @@ class Prober:
 
     @staticmethod
     def _working(candidate, latency, auth_used, text, model, metadata=None):
+        if not text or not text.strip():
+            return ProbeResult(
+                candidate.id,
+                "chat",
+                "empty_response",
+                http_status=200,
+                latency_ms=latency,
+                model_returned=model,
+                error="Provider returned a valid response envelope with empty assistant content",
+                auth_used=auth_used,
+                metadata=metadata or {},
+            )
         return ProbeResult(
             candidate.id,
             "chat",

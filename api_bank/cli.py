@@ -182,6 +182,7 @@ def agent_queue(args, store: Store) -> None:
             "needs_research",
             "invalid_endpoint",
             "invalid_response",
+            "empty_response",
             "rate_limited",
             "unreachable",
             "server_error",

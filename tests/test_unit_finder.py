@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+import copy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -59,8 +60,14 @@ class FakeSession:
 class SequenceSession:
     def __init__(self, responses):
         self.responses = iter(responses)
+        self.calls = []
 
-    def get(self, _url, **_kwargs):
+    def get(self, url, **kwargs):
+        self.calls.append((url, copy.deepcopy(kwargs)))
+        return next(self.responses)
+
+    def post(self, url, **kwargs):
+        self.calls.append((url, copy.deepcopy(kwargs)))
         return next(self.responses)
 
 
@@ -260,6 +267,47 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(result.status, "working")
         self.assertEqual(result.metadata["models"], ["model-a", "model-b"])
         self.assertEqual(result.metadata["model_count"], 2)
+
+    def test_openai_adapter_retries_without_reasoning_effort(self):
+        session = SequenceSession(
+            [
+                FakeResponse(status_code=400, text="unknown field"),
+                FakeResponse(
+                    payload={
+                        "model": "small",
+                        "choices": [
+                            {"message": {"content": "API_BANK_OK"}, "finish_reason": "stop"}
+                        ],
+                    }
+                ),
+            ]
+        )
+        candidate = Candidate(
+            provider="Example",
+            base_url="https://api.example.com/v1",
+            model="small",
+        )
+        result = Prober(session=session).probe_chat(candidate)
+        self.assertEqual(result.status, "working")
+        self.assertIn("reasoning_effort", session.calls[0][1]["json"])
+        self.assertNotIn("reasoning_effort", session.calls[1][1]["json"])
+
+    def test_empty_assistant_content_is_not_verified(self):
+        session = FakeSession(
+            FakeResponse(
+                payload={
+                    "model": "small",
+                    "choices": [{"message": {"content": ""}, "finish_reason": "length"}],
+                }
+            )
+        )
+        candidate = Candidate(
+            provider="Example",
+            base_url="https://api.example.com/v1",
+            model="small",
+        )
+        result = Prober(session=session).probe_chat(candidate)
+        self.assertEqual(result.status, "empty_response")
 
     def test_gemini_adapter_uses_query_key_and_normalizes_response(self):
         session = FakeSession(
