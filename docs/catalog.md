@@ -78,13 +78,13 @@
 | **Models (text)** | llama-3.3-70b, gpt-oss-120b, kimi-k2.7-code (262K ctx), gemma-4-26b, glm-4.7-flash, mistral-small-3.1-24b, deepseek-r1-distill-qwen-32b + 50+ more |
 | **OpenAI SDK?** | ❌ Custom API, but straightforward REST |
 
-### 8. GitHub Models 🇺🇸
+### 8. GitHub Models 🇺🇸 — ⚠️ RETIRED (2026-07-30)
 | Field | Detail |
 |---|---|
 | **Base URL** | `https://models.github.ai/inference` |
 | **Auth** | GitHub account (free for all users) |
 | **Rate Limit** | 10-15 RPM, 50-150 RPD per model; **45+ models** |
-| **Catch** | Per-request limit: 8K input / 4K output |
+| **Catch** | **RETIRED 2026-07-30** — service discontinued per official docs/changelog. Do not use. |
 | **Models (text)** | gpt-5, gpt-4.1/mini, gpt-4o, o4-mini, Llama-4-Scout/Maverick, Llama-3.3-70B, DeepSeek-R1, Mistral-Small-3.1 + 35+ more |
 | **OpenAI SDK?** | ✅ Yes |
 
@@ -161,10 +161,10 @@
 ### 16. DeepSeek Platform 🇨🇳
 | Field | Detail |
 |---|---|
-| **Base URL** | `https://api.deepseek.com/v1` |
+| **Base URL** | `https://api.deepseek.com` |
 | **Auth** | API key, phone verification |
-| **Rate Limit** | **5M tokens one-time for new users** |
-| **Models (text)** | deepseek-chat, deepseek-reasoner |
+| **Rate Limit** | No official free tier (paid; small new-user grant) |
+| **Models (text)** | deepseek-v4-flash, deepseek-v4-pro (`deepseek-chat` deprecated) |
 | **OpenAI SDK?** | ✅ Yes |
 
 ### 17. ModelScope 🇨🇳
@@ -256,7 +256,7 @@
 ### 27. Ollama Cloud
 | Field | Detail |
 |---|---|
-| **Base URL** | `https://api.ollama.com` |
+| **Base URL** | `https://ollama.com` |
 | **Auth** | API key from Ollama settings |
 | **Rate Limit** | Session limits (every 5 hrs) + weekly limits |
 | **Models (text)** | deepseek-v4-pro, deepseek-v4-flash, minimax-m3, kimi-k3, gpt-oss:120b/20b, nemotron-3-ultra, mistral-large-3:675b, qwen3.5:397b + 400+ more |
@@ -265,7 +265,7 @@
 ### 28. Z AI (Zhipu AI) 🇨🇳
 | Field | Detail |
 |---|---|
-| **Base URL** | `https://open.bigmodel.cn/api/paas/v4` |
+| **Base URL** | `https://api.z.ai/api/paas/v4` |
 | **Auth** | Free, no credit card |
 | **Rate Limit** | 1 concurrent request |
 | **Models (text)** | GLM-4.7-Flash (200K ctx, 128K output), GLM-4.5-Flash |
@@ -302,7 +302,7 @@
 | **S** | AINative Studio | 10M tokens/month, 60 RPM | ⭐ No CC |
 | **A** | Cerebras | 1M tokens/day | ⭐⭐⭐ Payment method |
 | **A** | Cloudflare Workers AI | 10K neurons/day | ⭐⭐ Account |
-| **A** | GitHub Models | 45 models × 50-150 RPD | ⭐ GitHub account |
+| **A** | GitHub Models ⚠️ retired | — | ⭐ GitHub account |
 | **A** | Hugging Face | Credit-metered | ⭐ Token |
 | **A** | Cohere | 1,000 req/month | ⭐ API key |
 | **B** | OpenRouter | 50-1,000 RPD | ⭐ API key |
@@ -310,13 +310,48 @@
 | **B** | SiliconFlow | 30 RPM, 60K TPM | ⭐ No CC |
 | **B** | LLM7.io | 30 RPM, no registration | 🆓 No auth |
 | **B** | Kilo Gateway | 200 req/hr, no account | 🆓 No auth |
-| **B** | DeepSeek | 5M tokens (one-time) | ⭐⭐ Phone verify |
+| **B** | DeepSeek | Paid (no free tier) | ⭐⭐ Phone verify |
 | **B** | ModelScope | 2,000 RPD | ⭐⭐⭐ Real-name verify |
 | **C** | OVHcloud | 2 RPM/model, no auth | 🆓 No auth |
 | **C** | FreeTheAi | 30 RPM, no daily cap | ⭐ Discord |
 | **C** | LongCat AI | 10M tokens (one-time) | ⭐⭐ KYC |
 | **C** | Chat Oripe | 2M tokens/month | ⭐ No CC |
 | **C** | 6+ more C-tier | ~100-200 req/day each | 🆓-⭐ |
+
+---
+
+## Verified research notes (2026-08-12)
+
+The key-gated (API-key) providers below were re-researched from current official
+documentation on 2026-08-12. Full findings — including the cited source URL and evidence
+summary for every provider — are archived in
+[`docs/research/2026-08-12-major-providers.json`](research/2026-08-12-major-providers.json).
+`free_tier: documented` means the official docs explicitly state free access; `claimed`
+means credible non-official claims only.
+
+| Provider | Model | Free-tier evidence |
+|---|---|---|
+| Google Gemini | gemini-2.5-flash | documented |
+| Mistral | mistral-small-latest | documented (Free mode) |
+| NVIDIA NIM | nvidia/nemotron-3-nano-30b-a3b | documented (prototyping) |
+| Cohere | command-r7b-12-2024 | documented (Trial key) |
+| OpenRouter | openai/gpt-oss-20b:free | documented (:free suffix) |
+| SambaNova | Meta-Llama-3.3-70B-Instruct | documented (no payment method) |
+| SiliconFlow | Qwen/Qwen3-8B | documented (.cn small models) |
+| Z AI (Zhipu) | glm-4.7-flash | documented ($0) |
+| Cerebras | gpt-oss-120b | documented ($5 trial credit, 30-day expiry) |
+| Hugging Face | meta-llama/Llama-3.1-8B-Instruct | documented (free tier) |
+| Cloudflare Workers AI | @cf/meta/llama-3.1-8b-instruct | documented (10K neurons/day) |
+| Groq | llama-3.1-8b-instant | claimed |
+| DeepSeek | deepseek-v4-flash | claimed |
+| Ollama Cloud | gpt-oss:120b | claimed |
+
+### Corrections applied
+
+- **GitHub Models** — reported retired 2026-07-30 per official docs/changelog. Excluded from findings; left in the seed catalog with a retirement flag.
+- **DeepSeek** — base URL `https://api.deepseek.com` (the `/v1` is a documented alias); `deepseek-chat` deprecated → `deepseek-v4-flash`.
+- **Z AI (Zhipu)** — international endpoint `https://api.z.ai/api/paas/v4`; `glm-4-flash` → `glm-4.7-flash` (free).
+- **Ollama Cloud** — host is `https://ollama.com` (not `api.ollama.com`); model `llama3.1:8b` unconfirmed → `gpt-oss:120b`.
 
 ---
 
